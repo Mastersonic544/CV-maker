@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CV Maker — Automate Your Ambition</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ============================================================
+       CV MAKER LANDING — CYBERPUNK EDITORIAL
+       Palette: #020810 / #00d4ff / #ff5c35 / DM Mono + Syne 800
+    ============================================================ */
+
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:            #020810;
+      --bg2:           #040d18;
+      --cyan:          #00d4ff;
+      --cyan-glow:     rgba(0,212,255,0.18);
+      --cyan-dim:      rgba(0,212,255,0.08);
+      --orange:        #ff5c35;
+      --orange-glow:   rgba(255,92,53,0.15);
+      --text:          #dde4ee;
+      --muted:         rgba(221,228,238,0.42);
+      --glass:         rgba(4,13,24,0.68);
+      --border:        rgba(255,255,255,0.07);
+      --resume-bg:     #f1f4f8;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      overflow-x: hidden;
+      cursor: none;
+    }
+
+    /* ── CURSOR ── */
+    #cur  { position:fixed; width:8px; height:8px; background:var(--cyan); border-radius:50%; pointer-events:none; z-index:10000; transform:translate(-50%,-50%); transition:width .15s,height .15s; mix-blend-mode:difference; }
+    #ring { position:fixed; width:34px; height:34px; border:1px solid rgba(0,212,255,.45); border-radius:50%; pointer-events:none; z-index:9999; transform:translate(-50%,-50%); transition:width .25s,height .25s,border-color .2s; }
+
+    /* ── GRAIN ── */
+    .grain {
+      position:fixed; inset:-200%; width:400%; height:400%;
+      pointer-events:none; z-index:9998; opacity:.04;
+      animation:grain-shift .4s steps(3) infinite;
+      background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+    @keyframes grain-shift {
+      0%   { transform: translate(0,0);  }
+      33%  { transform: translate(-4%,-6%); }
+      66%  { transform: translate(6%,3%);  }
+      100% { transform: translate(-2%,5%); }
+    }
+
+    /* ── NAV ── */
+    nav {
+      position:fixed; top:0; left:0; right:0; z-index:800;
+      height:60px; padding:0 3.5rem;
+      display:flex; align-items:center; justify-content:space-between;
+      background:var(--glass);
+      backdrop-filter: blur(28px) saturate(160%);
+      -webkit-backdrop-filter: blur(28px) saturate(160%);
+      border-bottom:1px solid var(--border);
+      transform:translateY(-100%);
+      transition:transform .5s cubic-bezier(.16,1,.3,1);
+    }
+    nav.show { transform:translateY(0); }
+
+    .nav-brand {
+      font-family:'Syne',sans-serif; font-weight:800; font-size:1.05rem;
+      letter-spacing:-.02em; color:var(--text);
+    }
+    .nav-brand em { color:var(--cyan); font-style:normal; }
+
+    .nav-links { display:flex; gap:2.5rem; list-style:none; }
+    .nav-links a {
+      font-size:.7rem; letter-spacing:.12em; text-transform:uppercase;
+      color:var(--muted); text-decoration:none; transition:color .2s;
+    }
+    .nav-links a:hover { color:var(--cyan); }
+
+    .nav-btn {
+      font-family:'DM Mono',monospace; font-size:.72rem;
+      letter-spacing:.08em; text-transform:uppercase;
+      color:var(--bg); background:var(--cyan);
+      border:none; padding:.45rem 1.3rem; cursor:none; font-weight:500;
+      clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,0 100%);
+      transition:opacity .2s;
+    }
+    .nav-btn:hover { opacity:.8; }
+
+    /* ── HERO ── */
+    #hero {
+      min-height:100vh; padding:64px 4rem 0;
+      display:grid; grid-template-columns:1fr 1fr;
+      align-items:center; position:relative; overflow:hidden;
+    }
+
+    /* Dot-grid backdrop */
+    #hero::before {
+      content:''; position:absolute; inset:0;
+      background-image:radial-gradient(rgba(0,212,255,.11) 1px, transparent 1px);
+      background-size:46px 46px;
+      mask-image:radial-gradient(ellipse 65% 80% at 75% 50%, rgba(0,0,0,.7), transparent);
+      pointer-events:none;
+    }
+
+    /* Ambient cyan glow */
+    #hero::after {
+      content:''; position:absolute;
+      width:700px; height:700px; right:-80px; top:50%;
+      transform:translateY(-50%);
+      background:radial-gradient(circle, rgba(0,212,255,.07) 0%, transparent 68%);
+      pointer-events:none;
+    }
+
+    /* ── HERO TEXT ── */
+    .hero-copy { position:relative; z-index:2; }
+
+    .hero-eyebrow {
+      display:flex; align-items:center; gap:.75rem;
+      font-size:.68rem; letter-spacing:.24em; text-transform:uppercase;
+      color:var(--cyan); margin-bottom:1.75rem;
+      opacity:0; animation:fadeUp .6s .2s forwards;
+    }
+    .hero-eyebrow::before {
+      content:''; width:22px; height:1px; background:var(--cyan); flex-shrink:0;
+    }
+
+    .hero-h1 {
+      font-family:'Syne',sans-serif; font-weight:800;
+      font-size:clamp(3rem,5.8vw,6rem); line-height:.92;
+      letter-spacing:-.04em; margin-bottom:1.6rem;
+    }
+    .hero-h1 .line { display:block; overflow:hidden; }
+    .hero-h1 .line span {
+      display:block; opacity:0; transform:translateY(105%);
+    }
+    .hero-h1 .line:nth-child(1) span { animation:slideUp .72s .4s cubic-bezier(.16,1,.3,1) forwards; }
+    .hero-h1 .line:nth-child(2) span { animation:slideUp .72s .56s cubic-bezier(.16,1,.3,1) forwards; }
+    .hero-h1 .line:nth-child(3) span { animation:slideUp .72s .72s cubic-bezier(.16,1,.3,1) forwards; }
+    .hero-h1 .hl { color:var(--cyan); }
+
+    .hero-sub {
+      font-size:.85rem; line-height:1.8; color:var(--muted);
+      max-width:440px; margin-bottom:2.5rem;
+      opacity:0; animation:fadeUp .7s .9s forwards;
+    }
+
+    .hero-ctas {
+      display:flex; gap:1rem; align-items:center;
+      opacity:0; animation:fadeUp .7s 1.05s forwards;
+    }
+
+    .btn-prim {
+      font-family:'DM Mono',monospace; font-size:.78rem;
+      letter-spacing:.07em; text-transform:uppercase;
+      color:var(--bg); background:var(--cyan);
+      border:none; padding:.9rem 2rem; cursor:none; font-weight:500;
+      clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px));
+      position:relative; overflow:hidden; transition:opacity .2s;
+    }
+    .btn-prim::after {
+      content:''; position:absolute; inset:0;
+      background:linear-gradient(105deg,transparent 0%,rgba(255,255,255,.22) 50%,transparent 100%);
+      transform:translateX(-100%); transition:transform .55s ease;
+    }
+    .btn-prim:hover { opacity:.92; }
+    .btn-prim:hover::after { transform:translateX(100%); }
+
+    .btn-ghost {
+      font-family:'DM Mono',monospace; font-size:.78rem;
+      letter-spacing:.07em; text-transform:uppercase;
+      color:var(--muted); background:none;
+      border:1px solid var(--border);
+      padding:.9rem 2rem; cursor:none;
+      transition:color .2s,border-color .2s;
+    }
+    .btn-ghost:hover { color:var(--text); border-color:rgba(255,255,255,.18); }
+
+    /* ── 3-D RESUME ── */
+    .resume-scene {
+      position:relative; z-index:2;
+      display:flex; align-items:center; justify-content:center;
+      perspective:1100px;
+      opacity:0; animation:fadeIn 1s .5s forwards;
+    }
+
+    .r-wrap {
+      transform-style:preserve-3d;
+      transform:rotateX(-8deg) rotateY(18deg);
+      position:relative;
+      will-change:transform;
+    }
+
+    /* Glow halo */
+    .r-halo {
+      position:absolute; inset:-30px;
+      background:var(--cyan); opacity:.05; filter:blur(55px);
+      border-radius:4px;
+      transform:translateZ(-90px) scale(.88);
+      pointer-events:none;
+    }
+
+    /* The paper */
+    .r-card {
+      width:360px; min-height:460px;
+      background:var(--resume-bg);
+      padding:2.25rem 1.85rem 2.25rem;
+      position:relative; overflow:hidden;
+      box-shadow:
+        0 60px 130px rgba(0,0,0,.85),
+        0 0 0 1px rgba(255,255,255,.09),
+        0 0 90px rgba(0,212,255,.13);
+    }
+
+    /* Left accent bar */
+    .r-card::before {
+      content:''; position:absolute; top:0; left:0; width:3px; height:100%;
+      background:linear-gradient(to bottom, var(--cyan), rgba(0,212,255,.25));
+    }
+
+    /* Scanner beam */
+    .r-scan {
+      position:absolute; left:0; right:0; height:2px; z-index:20;
+      background:linear-gradient(to right,transparent,var(--cyan),transparent);
+      box-shadow:0 0 18px var(--cyan), 0 0 40px rgba(0,212,255,.45);
+      animation:scan 3.5s ease-in-out infinite;
+    }
+    @keyframes scan {
+      0%   { top:-2px; opacity:0; }
+      4%   { opacity:1; }
+      96%  { opacity:1; }
+      100% { top:100%; opacity:0; }
+    }
+
+    /* AI Score badge */
+    .r-badge {
+      position:absolute; top:1.4rem; right:1.4rem;
+      width:46px; height:46px;
+      border:1.5px solid var(--cyan);
+      background:rgba(0,212,255,.07);
+      display:flex; flex-direction:column;
+      align-items:center; justify-content:center;
+    }
+    .r-badge-n { font-family:'Syne',sans-serif; font-weight:800; font-size:1rem; color:var(--cyan); line-height:1; }
+    .r-badge-l { font-size:.42rem; letter-spacing:.1em; color:rgba(0,212,255,.55); text-transform:uppercase; margin-top:2px; }
+
+    /* Resume typography */
+    .rn { font-family:'Syne',sans-serif; font-weight:700; font-size:1.1rem; color:#1a1f2e; letter-spacing:-.02em; margin-bottom:.2rem; }
+    .rt { font-size:.62rem; letter-spacing:.12em; text-transform:uppercase; color:#64748b; margin-bottom:.7rem; }
+    .rc { display:flex; gap:.85rem; font-size:.56rem; color:#94a3b8; padding-bottom:.7rem; border-bottom:1px solid #e2e8f0; margin-bottom:.9rem; }
+
+    .rs-label { font-size:.52rem; letter-spacing:.2em; text-transform:uppercase; color:#007fa0; font-weight:500; margin-bottom:.45rem; }
+    .re { margin-bottom:.8rem; }
+    .re-top { display:flex; justify-content:space-between; align-items:baseline; }
+    .re-co { font-family:'Syne',sans-serif; font-weight:600; font-size:.72rem; color:#1e293b; }
+    .re-dt { font-size:.52rem; color:#94a3b8; }
+    .re-role { font-size:.58rem; color:#64748b; margin:.15rem 0 .25rem; }
+    .re-bullet { font-size:.57rem; color:#475569; line-height:1.55; padding-left:.7rem; position:relative; }
+    .re-bullet::before { content:'▸'; position:absolute; left:0; color:#007fa0; font-size:.48rem; top:.05em; }
+
+    .r-skills-wrap { display:flex; flex-wrap:wrap; gap:.28rem; }
+    .r-tag { font-size:.52rem; padding:.18rem .48rem; border:1px solid #e2e8f0; color:#64748b; background:#fff; }
+
+    /* Floating data chips */
+    .float-chip {
+      position:absolute; font-family:'DM Mono',monospace;
+      font-size:.58rem; color:rgba(0,212,255,.35);
+      pointer-events:none; white-space:nowrap;
+      transform-style:preserve-3d;
+    }
+
+    /* ── SCROLL HINT ── */
+    .scroll-hint {
+      position:absolute; bottom:2.5rem; left:50%; transform:translateX(-50%);
+      display:flex; flex-direction:column; align-items:center; gap:.45rem;
+      opacity:0; animation:fadeIn 1s 1.6s forwards;
+    }
+    .scroll-hint span { font-size:.58rem; letter-spacing:.2em; text-transform:uppercase; color:var(--muted); }
+    .s-line { width:1px; height:38px; background:linear-gradient(to bottom,var(--cyan),transparent); animation:pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:.5;transform:scaleY(1)} 50%{opacity:1;transform:scaleY(.65)} }
+
+    /* ── MARQUEE ── */
+    .mq {
+      overflow:hidden;
+      border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+      padding:.9rem 0; background:rgba(0,212,255,.025);
+    }
+    .mq-track {
+      display:flex; gap:2.5rem; width:max-content;
+      animation:mq 28s linear infinite;
+    }
+    .mq-item {
+      display:flex; align-items:center; gap:1.25rem; white-space:nowrap;
+      font-family:'Syne',sans-serif; font-weight:700;
+      font-size:.78rem; letter-spacing:.18em; text-transform:uppercase; color:var(--muted);
+    }
+    .mq-dot { width:4px; height:4px; background:var(--cyan); border-radius:50%; flex-shrink:0; }
+    @keyframes mq { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+
+    /* ── SECTIONS SHARED ── */
+    .s-label {
+      display:flex; align-items:center; gap:.75rem;
+      font-size:.68rem; letter-spacing:.22em; text-transform:uppercase; color:var(--cyan);
+      margin-bottom:1rem;
+    }
+    .s-label::before { content:''; width:22px; height:1px; background:var(--cyan); }
+
+    .s-title {
+      font-family:'Syne',sans-serif; font-weight:800;
+      font-size:clamp(2rem,3.8vw,3.5rem); line-height:1;
+      letter-spacing:-.035em;
+    }
+
+    .reveal { opacity:0; transform:translateY(28px); transition:opacity .65s,transform .65s; }
+    .reveal.in { opacity:1; transform:translateY(0); }
+
+    /* ── PROCESS ── */
+    #process { padding:9rem 4rem; }
+
+    .process-grid {
+      margin-top:4rem;
+      display:grid; grid-template-columns:repeat(3,1fr); gap:1.5px;
+      background:var(--border); border:1px solid var(--border);
+    }
+
+    .p-card {
+      padding:3rem 2.5rem; background:var(--bg);
+      position:relative; overflow:hidden;
+      opacity:0; transform:translateY(24px);
+      transition:opacity .6s,transform .6s,background .3s;
+    }
+    .p-card.in { opacity:1; transform:translateY(0); }
+    .p-card:nth-child(2) { transition-delay:.1s; }
+    .p-card:nth-child(3) { transition-delay:.2s; }
+    .p-card:hover { background:rgba(0,212,255,.02); }
+    .p-card::after {
+      content:''; position:absolute; top:0; left:0; right:0; height:1px;
+      background:linear-gradient(to right,var(--cyan),transparent);
+      opacity:0; transition:opacity .3s;
+    }
+    .p-card:hover::after { opacity:1; }
+
+    .p-num {
+      font-family:'Syne',sans-serif; font-weight:800;
+      font-size:4rem; line-height:1; color:rgba(0,212,255,.1);
+      margin-bottom:1.25rem;
+    }
+    .p-title { font-family:'Syne',sans-serif; font-weight:700; font-size:1.1rem; margin-bottom:.75rem; }
+    .p-body { font-size:.78rem; line-height:1.75; color:var(--muted); }
+    .p-tag {
+      display:inline-block; margin-top:1.5rem;
+      font-size:.58rem; letter-spacing:.1em; text-transform:uppercase;
+      padding:.22rem .6rem; border:1px solid var(--border); color:var(--muted);
+    }
+
+    /* ── STATS ── */
+    .stats-row {
+      display:grid; grid-template-columns:repeat(4,1fr);
+      border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+    }
+    .stat {
+      padding:3.5rem 3rem;
+      border-right:1px solid var(--border);
+      opacity:0; transform:translateY(18px);
+      transition:opacity .5s,transform .5s;
+    }
+    .stat:last-child { border-right:none; }
+    .stat.in { opacity:1; transform:translateY(0); }
+    .stat:nth-child(2){transition-delay:.08s} .stat:nth-child(3){transition-delay:.16s} .stat:nth-child(4){transition-delay:.24s}
+    .stat-n {
+      font-family:'Syne',sans-serif; font-weight:800;
+      font-size:3rem; letter-spacing:-.04em; line-height:1; margin-bottom:.5rem;
+    }
+    .stat-n em { color:var(--cyan); font-style:normal; }
+    .stat-d { font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+
+    /* ── FEATURES ── */
+    #features { padding:9rem 4rem; }
+    .feat-grid {
+      margin-top:3.5rem;
+      display:grid; grid-template-columns:1fr 1fr; gap:1.5px;
+      background:var(--border); border:1px solid var(--border);
+    }
+    .feat {
+      padding:3rem; background:var(--bg);
+      opacity:0; transform:translateY(18px);
+      transition:opacity .55s,transform .55s,background .25s;
+    }
+    .feat.in { opacity:1; transform:translateY(0); }
+    .feat:nth-child(2){transition-delay:.09s} .feat:nth-child(3){transition-delay:.18s} .feat:nth-child(4){transition-delay:.27s}
+    .feat:hover { background:rgba(0,212,255,.018); }
+    .feat-idx { font-size:.58rem; letter-spacing:.2em; color:var(--cyan); margin-bottom:1.25rem; }
+    .feat-title { font-family:'Syne',sans-serif; font-weight:700; font-size:1.3rem; letter-spacing:-.02em; margin-bottom:.7rem; }
+    .feat-body { font-size:.78rem; line-height:1.78; color:var(--muted); }
+    .feat-pill {
+      display:inline-block; margin-top:1.5rem;
+      font-size:.58rem; letter-spacing:.08em; text-transform:uppercase;
+      padding:.22rem .65rem; border:1px solid var(--border); color:var(--muted);
+    }
+
+    /* ── TEAM ── */
+    #team { padding:9rem 0; overflow:hidden; }
+    .team-hdr { padding:0 4rem; margin-bottom:5rem; }
+
+    .team-split { display:grid; grid-template-columns:1fr 1fr; }
+
+    .member {
+      padding:5rem 4.5rem;
+      position:relative; overflow:hidden; cursor:none;
+      opacity:0; transition:opacity .8s;
+    }
+    .member.in { opacity:1; }
+    .member:first-child { border-right:1px solid var(--border); }
+
+    /* Hover glow */
+    .member::before {
+      content:''; position:absolute; inset:0; opacity:0; transition:opacity .4s;
+      pointer-events:none;
+    }
+    .member:first-child::before {
+      background:radial-gradient(ellipse 50% 60% at 40% 50%, rgba(0,212,255,.07), transparent);
+    }
+    .member:last-child::before {
+      background:radial-gradient(ellipse 50% 60% at 60% 50%, rgba(255,92,53,.07), transparent);
+    }
+    .member:hover::before { opacity:1; }
+
+    /* Huge background letter watermark */
+    .member-bg-letter {
+      position:absolute; font-family:'Syne',sans-serif; font-weight:800;
+      font-size:18vw; line-height:1; top:50%; transform:translateY(-50%);
+      letter-spacing:-.05em; color:rgba(255,255,255,.02); pointer-events:none;
+      user-select:none;
+    }
+    .member:first-child .member-bg-letter { right:-2rem; }
+    .member:last-child  .member-bg-letter { left:-2rem; }
+
+    .m-idx { font-size:.62rem; letter-spacing:.22em; color:var(--muted); margin-bottom:2rem; }
+    .m-name {
+      font-family:'Syne',sans-serif; font-weight:800;
+      font-size:clamp(2.8rem,4.5vw,5rem); line-height:.88; letter-spacing:-.05em;
+      margin-bottom:1.5rem; transition:color .3s;
+    }
+    .member:first-child .m-name:hover { color:var(--cyan); }
+    .member:last-child  .m-name:hover { color:var(--orange); }
+
+    .m-role { font-size:.68rem; letter-spacing:.15em; text-transform:uppercase; color:var(--muted); margin-bottom:1.5rem; }
+    .m-bar { height:1px; background:var(--border); transition:width .35s,background .35s; width:40px; }
+    .member:first-child:hover .m-bar { width:80px; background:var(--cyan); }
+    .member:last-child:hover  .m-bar { width:80px; background:var(--orange); }
+
+    /* ── CTA ── */
+    #cta {
+      padding:11rem 4rem; text-align:center;
+      position:relative; overflow:hidden;
+    }
+    #cta::before {
+      content:''; position:absolute; inset:0;
+      background:radial-gradient(ellipse 55% 55% at 50% 50%, rgba(0,212,255,.05), transparent);
+    }
+    .cta-eye { font-size:.68rem; letter-spacing:.24em; text-transform:uppercase; color:var(--cyan); margin-bottom:1.5rem; }
+    .cta-h {
+      font-family:'Syne',sans-serif; font-weight:800;
+      font-size:clamp(3.5rem,8vw,8.5rem); line-height:.88;
+      letter-spacing:-.05em; margin-bottom:2rem;
+    }
+    .cta-sub { font-size:.85rem; color:var(--muted); max-width:480px; margin:0 auto 3rem; line-height:1.8; }
+
+    /* ── FOOTER ── */
+    footer {
+      padding:2.5rem 4rem; border-top:1px solid var(--border);
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    .f-logo { font-family:'Syne',sans-serif; font-weight:800; font-size:1rem; letter-spacing:-.02em; }
+    .f-logo em { color:var(--cyan); font-style:normal; }
+    .f-copy { font-size:.62rem; color:var(--muted); letter-spacing:.09em; }
+    .f-ver  { font-size:.62rem; color:rgba(0,212,255,.35); letter-spacing:.09em; }
+
+    /* ── KEYFRAMES ── */
+    @keyframes fadeUp  { to { opacity:1; transform:translateY(0); } }
+    @keyframes slideUp { to { opacity:1; transform:translateY(0); } }
+    @keyframes fadeIn  { to { opacity:1; } }
+  </style>
+</head>
+<body>
+
+<div class="grain"></div>
+<div id="cur"></div>
+<div id="ring"></div>
+
+<!-- NAV -->
+<nav id="nav">
+  <div class="nav-brand">CV<em>.</em>MAKER</div>
+  <ul class="nav-links">
+    <li><a href="#process">Process</a></li>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#team">Team</a></li>
+  </ul>
+  <button class="nav-btn" onclick="window.location='http://localhost:3000'">Launch App</button>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+  <div class="hero-copy">
+    <div class="hero-eyebrow">AI-Powered Job Automation</div>
+
+    <h1 class="hero-h1">
+      <span class="line"><span>AUTOMATE</span></span>
+      <span class="line"><span>YOUR <span class="hl">AMBITION</span></span></span>
+      <span class="line"><span>LAND THE JOB</span></span>
+    </h1>
+
+    <p class="hero-sub">
+      CV Maker crafts hyper-targeted resumes through a GAN scoring loop, then auto-applies via
+      LinkedIn Easy Apply, SMTP, and DMs — while you focus on what's next.
+    </p>
+
+    <div class="hero-ctas">
+      <button class="btn-prim" onclick="window.location='http://localhost:3000'">Launch App →</button>
+      <button class="btn-ghost" onclick="document.getElementById('process').scrollIntoView({behavior:'smooth'})">See How It Works</button>
+    </div>
+  </div>
+
+  <!-- 3D Resume -->
+  <div class="resume-scene">
+    <div class="float-chip" style="top:12%;left:-8%;transform:translateZ(-70px);">SCORE: 9.4 / 10</div>
+    <div class="float-chip" style="bottom:22%;right:-2%;transform:translateZ(-50px);font-size:.5rem;opacity:.22;">GAN_ITER_03 ✓</div>
+    <div class="float-chip" style="top:58%;left:-6%;transform:translateZ(-55px);font-size:.5rem;opacity:.2;">ATS_MATCH: 94%</div>
+
+    <div class="r-wrap" id="rWrap">
+      <div class="r-halo"></div>
+      <div class="r-card">
+        <div class="r-scan"></div>
+
+        <div class="r-badge">
+          <div class="r-badge-n">9.4</div>
+          <div class="r-badge-l">SCORE</div>
+        </div>
+
+        <div class="rn">Alex Rivera</div>
+        <div class="rt">Senior Full-Stack Engineer</div>
+        <div class="rc">
+          <span>github.com/arivera</span>
+          <span>alex@rivera.dev</span>
+          <span>Remote / Open</span>
+        </div>
+
+        <div style="margin-bottom:.8rem">
+          <div class="rs-label">Experience</div>
+
+          <div class="re">
+            <div class="re-top">
+              <span class="re-co">Stripe</span>
+              <span class="re-dt">2022 — Present</span>
+            </div>
+            <div class="re-role">Senior Software Engineer</div>
+            <div class="re-bullet">Engineered pipeline processing $2.3B/day in volume</div>
+            <div class="re-bullet">Reduced API latency 47% via distributed cache layer</div>
+          </div>
+
+          <div class="re">
+            <div class="re-top">
+              <span class="re-co">Vercel</span>
+              <span class="re-dt">2020 — 2022</span>
+            </div>
+            <div class="re-role">Software Engineer</div>
+            <div class="re-bullet">Built edge runtime serving 3M+ deployments/day</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="rs-label">Skills</div>
+          <div class="r-skills-wrap">
+            <span class="r-tag">TypeScript</span>
+            <span class="r-tag">Rust</span>
+            <span class="r-tag">Go</span>
+            <span class="r-tag">React</span>
+            <span class="r-tag">K8s</span>
+            <span class="r-tag">Postgres</span>
+            <span class="r-tag">AWS</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scroll-hint">
+    <span>Scroll</span>
+    <div class="s-line"></div>
+  </div>
+</section>
+
+<!-- MARQUEE -->
+<div class="mq">
+  <div class="mq-track">
+    <div class="mq-item"><span class="mq-dot"></span> GAN Scoring Loop</div>
+    <div class="mq-item"><span class="mq-dot"></span> Playwright Automation</div>
+    <div class="mq-item"><span class="mq-dot"></span> LinkedIn Easy Apply</div>
+    <div class="mq-item"><span class="mq-dot"></span> Persona-Driven CVs</div>
+    <div class="mq-item"><span class="mq-dot"></span> Brevo SMTP</div>
+    <div class="mq-item"><span class="mq-dot"></span> Interview Simulator</div>
+    <div class="mq-item"><span class="mq-dot"></span> ATS Optimization</div>
+    <div class="mq-item"><span class="mq-dot"></span> HR Persona Research</div>
+    <!-- Duplicate for seamless loop -->
+    <div class="mq-item"><span class="mq-dot"></span> GAN Scoring Loop</div>
+    <div class="mq-item"><span class="mq-dot"></span> Playwright Automation</div>
+    <div class="mq-item"><span class="mq-dot"></span> LinkedIn Easy Apply</div>
+    <div class="mq-item"><span class="mq-dot"></span> Persona-Driven CVs</div>
+    <div class="mq-item"><span class="mq-dot"></span> Brevo SMTP</div>
+    <div class="mq-item"><span class="mq-dot"></span> Interview Simulator</div>
+    <div class="mq-item"><span class="mq-dot"></span> ATS Optimization</div>
+    <div class="mq-item"><span class="mq-dot"></span> HR Persona Research</div>
+  </div>
+</div>
+
+<!-- PROCESS -->
+<section id="process">
+  <div class="s-label reveal">The Process</div>
+  <div class="s-title reveal">Three phases.<br>Zero manual effort.</div>
+
+  <div class="process-grid">
+    <div class="p-card">
+      <div class="p-num">01</div>
+      <div class="p-title">Discover & Research</div>
+      <p class="p-body">Feed your profile once. AI suggests roles, scrapes LinkedIn for live listings, then deep-dives each company — CEO posts, HR signals, cultural values — to synthesize a hiring persona for every target.</p>
+      <span class="p-tag">OpenRouter · Playwright</span>
+    </div>
+    <div class="p-card">
+      <div class="p-num">02</div>
+      <div class="p-title">Generate & Score</div>
+      <p class="p-body">Two LLM instances go to war. One generates your CV, the other scores it as a ruthless HR critic. The loop runs until you hit 9+/10. A completely different, optimized document per company — never reused.</p>
+      <span class="p-tag">GAN Loop · Llama 3.3 70B</span>
+    </div>
+    <div class="p-card">
+      <div class="p-num">03</div>
+      <div class="p-title">Apply & Practice</div>
+      <p class="p-body">The queue sends via LinkedIn Easy Apply, Brevo SMTP, and LinkedIn DMs with human-like timing. The interview simulator then role-plays as your exact HR contact so you arrive knowing the answers.</p>
+      <span class="p-tag">Rate-Limited · 20/day</span>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<div class="stats-row">
+  <div class="stat">
+    <div class="stat-n">9<em>.4</em></div>
+    <div class="stat-d">Avg CV Score (GAN)</div>
+  </div>
+  <div class="stat">
+    <div class="stat-n">20<em>/day</em></div>
+    <div class="stat-d">Applications Automated</div>
+  </div>
+  <div class="stat">
+    <div class="stat-n">100<em>%</em></div>
+    <div class="stat-d">Local — Zero Cloud</div>
+  </div>
+  <div class="stat">
+    <div class="stat-n">0<em>$</em></div>
+    <div class="stat-d">Free Tier Stack</div>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="s-label reveal">Capabilities</div>
+  <div class="s-title reveal">Built different.</div>
+
+  <div class="feat-grid">
+    <div class="feat">
+      <div class="feat-idx">Feature / 01</div>
+      <div class="feat-title">GAN-Style CV Loop</div>
+      <p class="feat-body">A Generator and Discriminator LLM fight over your resume until the HR critic awards 9+/10. Every bullet quantified, every tone calibrated to the exact persona of your target company.</p>
+      <span class="feat-pill">meta-llama / llama-3.3-70b</span>
+    </div>
+    <div class="feat">
+      <div class="feat-idx">Feature / 02</div>
+      <div class="feat-title">Hiring Persona Synthesis</div>
+      <p class="feat-body">Scrapes CEO LinkedIn posts, HR activity, and company mission statements. The AI synthesizes a detailed personality map — tone, values, red flags — and uses it to shape every word of your application.</p>
+      <span class="feat-pill">Playwright + OpenRouter</span>
+    </div>
+    <div class="feat">
+      <div class="feat-idx">Feature / 03</div>
+      <div class="feat-title">Headless Auto-Apply</div>
+      <p class="feat-body">Playwright-powered LinkedIn Easy Apply with human-like timing, scroll simulation, and multi-step form handling. Brevo SMTP for email applications with PDF attachments and LinkedIn DMs for direct HR outreach.</p>
+      <span class="feat-pill">Rate-limited — 20 apps/day</span>
+    </div>
+    <div class="feat">
+      <div class="feat-idx">Feature / 04</div>
+      <div class="feat-title">Interview Simulator</div>
+      <p class="feat-body">Before the real thing, the AI role-plays as your target company's HR persona in a live chat. Hit "Help Me" for real-time coaching — hidden intent decoded, ideal structure provided — without breaking immersion.</p>
+      <span class="feat-pill">Persona-Injected LLM</span>
+    </div>
+  </div>
+</section>
+
+<!-- TEAM -->
+<section id="team">
+  <div class="team-hdr">
+    <div class="s-label reveal">Built By</div>
+    <div class="s-title reveal">The engineers<br>behind the machine.</div>
+  </div>
+
+  <div class="team-split">
+    <div class="member">
+      <div class="member-bg-letter">Y</div>
+      <div class="m-idx">01 — Developer</div>
+      <div class="m-name">YASSINE<br>DHOUIB</div>
+      <div class="m-role">Full-Stack · AI Integration</div>
+      <div class="m-bar"></div>
+    </div>
+    <div class="member">
+      <div class="member-bg-letter">Z</div>
+      <div class="m-idx">02 — Developer</div>
+      <div class="m-name">ZIED<br>CHERIF</div>
+      <div class="m-role">Frontend · Automation</div>
+      <div class="m-bar"></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section id="cta">
+  <div class="cta-eye">Ready to automate?</div>
+  <div class="cta-h reveal">STOP<br>APPLYING<br>MANUALLY.</div>
+  <p class="cta-sub">Set up once. Let the machine handle the rest.<br>Your time is worth more than copy-pasting cover letters.</p>
+  <button class="btn-prim" onclick="window.location='http://localhost:3000'" style="font-size:.88rem;padding:1.1rem 3rem">
+    Launch CV Maker →
+  </button>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="f-logo">CV<em>.</em>MAKER</div>
+  <div class="f-copy">© 2026 Yassine Dhouib &amp; Zied Cherif</div>
+  <div class="f-ver">v1.0.0 — Local AI Stack</div>
+</footer>
+
+<script>
+/* ========================================================
+   INTERACTIONS
+======================================================== */
+
+// ── CUSTOM CURSOR ──────────────────────────────────────
+const cur  = document.getElementById('cur');
+const ring = document.getElementById('ring');
+let mX = 0, mY = 0, rX = 0, rY = 0;
+
+document.addEventListener('mousemove', e => {
+  mX = e.clientX; mY = e.clientY;
+  cur.style.left = mX + 'px';
+  cur.style.top  = mY + 'px';
+});
+
+(function tickRing() {
+  rX += (mX - rX) * .11;
+  rY += (mY - rY) * .11;
+  ring.style.left = rX + 'px';
+  ring.style.top  = rY + 'px';
+  requestAnimationFrame(tickRing);
+})();
+
+document.querySelectorAll('button, a, .member, .feat, .p-card').forEach(el => {
+  el.addEventListener('mouseenter', () => {
+    cur.style.width = cur.style.height = '14px';
+    ring.style.width = ring.style.height = '52px';
+    ring.style.borderColor = 'rgba(0,212,255,.85)';
+  });
+  el.addEventListener('mouseleave', () => {
+    cur.style.width = cur.style.height = '8px';
+    ring.style.width = ring.style.height = '34px';
+    ring.style.borderColor = 'rgba(0,212,255,.45)';
+  });
+});
+
+// ── NAVBAR ─────────────────────────────────────────────
+const nav = document.getElementById('nav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('show', window.scrollY > 60);
+}, { passive: true });
+
+// ── 3D RESUME: PARALLAX + MOUSE TILT ──────────────────
+const rWrap  = document.getElementById('rWrap');
+const hero   = document.getElementById('hero');
+let sRX = -8, sRY = 18;   // scroll component
+let mRX = 0,  mRY = 0;    // mouse component
+let raf;
+
+function applyTilt() {
+  rWrap.style.transform =
+    `rotateX(${sRX + mRX}deg) rotateY(${sRY + mRY}deg) translateZ(20px)`;
+}
+
+window.addEventListener('scroll', () => {
+  const heroH    = hero.offsetHeight;
+  const progress = Math.max(0, Math.min(1, -hero.getBoundingClientRect().top / heroH));
+  sRX = -8  + progress * 8;    // -8  → 0
+  sRY =  18 - progress * 18;   // 18  → 0
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(applyTilt);
+}, { passive: true });
+
+document.addEventListener('mousemove', e => {
+  const hRect = hero.getBoundingClientRect();
+  if (hRect.bottom < 0 || hRect.top > window.innerHeight) return;
+  mRX = (e.clientY / window.innerHeight - 0.5) * -14;
+  mRY = (e.clientX / window.innerWidth  - 0.5) *  14;
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(applyTilt);
+});
+
+// ── SCROLL REVEAL (IntersectionObserver) ──────────────
+const io = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('in'); });
+}, { threshold: 0.14 });
+
+document.querySelectorAll('.reveal, .p-card, .feat, .stat, .member').forEach(el => io.observe(el));
+</script>
+
+</body>
+</html>

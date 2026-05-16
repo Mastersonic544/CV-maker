@@ -12,3 +12,6 @@ dist/
 .pytest_cache/
 MagicMock/
 test_output*.txt
+data/master.key
+data/.active_user
+data/users/

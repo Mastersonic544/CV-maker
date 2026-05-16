@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from backend.config import settings
-from backend.routers import profile, discovery, generation, apply, history, interview
+from backend.routers import profile, discovery, generation, apply, history, interview, users
 from backend.storage import json_store
 
 # Setup logging
@@ -20,8 +20,8 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 app = FastAPI(
-    title="AutoApply Platform API",
-    description="Backend for the AutoApply job automation platform",
+    title="CV Maker Platform API",
+    description="Backend for the CV Maker multi-user job application platform",
     version="1.0.0"
 )
 
@@ -35,12 +35,25 @@ app.add_middleware(
 )
 
 # Mount Routers
+app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(profile.router, prefix="/api/profile", tags=["Profile"])
 app.include_router(discovery.router, prefix="/api/discovery", tags=["Discovery"])
 app.include_router(generation.router, prefix="/api/generation", tags=["Generation"])
 app.include_router(apply.router, prefix="/api/apply", tags=["Apply"])
 app.include_router(history.router, prefix="/api/history", tags=["History"])
 app.include_router(interview.router, prefix="/api/interview", tags=["Interview"])
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Run migrations and other startup tasks."""
+    try:
+        from backend.services import user_service
+        user_service.migrate_existing_data()
+        logger.info("Startup: user data migration check complete")
+    except Exception as exc:
+        logger.warning(f"Startup migration warning: {exc}")
+
 
 @app.get("/health")
 async def health_check():
@@ -51,11 +64,12 @@ async def health_check():
         profile_loaded = True
     except Exception:
         pass
-        
+
     return {
         "status": "ok",
         "profile_loaded": profile_loaded
     }
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -68,6 +82,7 @@ async def global_exception_handler(request: Request, exc: Exception):
             "message": str(exc) if not isinstance(exc, RuntimeError) else "A server error occurred."
         }
     )
+
 
 if __name__ == "__main__":
     import uvicorn

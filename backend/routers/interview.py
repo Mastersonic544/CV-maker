@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 
 from backend.config import settings
 from backend.services.interview_service import start_session, send_message, get_help, end_session
+from backend.storage import json_store
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ async def terminate_session_endpoint(company_id: str, session_id: str):
 @router.get("/{company_id}/sessions")
 async def list_sessions(company_id: str):
     """Fetch historic session overviews"""
-    dir_path = settings.INTERVIEW_SESSIONS_DIR / company_id
+    dir_path = json_store.get_interview_sessions_dir() / company_id
     if not dir_path.exists():
         return []
     
@@ -68,7 +69,7 @@ async def list_sessions(company_id: str):
 @router.delete("/{company_id}/sessions")
 async def clear_sessions(company_id: str):
     """Purge target historical session logs safely"""
-    dir_path = settings.INTERVIEW_SESSIONS_DIR / company_id
+    dir_path = json_store.get_interview_sessions_dir() / company_id
     if dir_path.exists():
         for f in dir_path.glob("*.json"):
             try:

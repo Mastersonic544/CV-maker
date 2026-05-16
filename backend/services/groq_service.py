@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 llm_client_available = bool(settings.OPENROUTER_API_KEY)
 
 if not llm_client_available:
-    logger.warning("No OPENROUTER_API_KEY provided — using mocked LLM responses for development.")
+    logger.warning("OPENROUTER_API_KEY not set in .env — using mocked LLM responses. Set the platform key to enable live AI.")
 
 
 async def call_groq(

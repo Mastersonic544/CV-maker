@@ -65,7 +65,7 @@ async def _apply_single(target, cv_pdf: Path, cl_pdf: Path) -> dict:
 
 def _record_result(target, cv_pdf: Path, cl_pdf: Path, result: dict) -> None:
     """Write outcome to history.json and flip target status."""
-    target_dir = Path(settings.DATA_DIR) / "applications" / target.company_id
+    target_dir = json_store.get_applications_dir() / target.company_id
     cv_score = settings.MIN_CV_SCORE
     iter_path = target_dir / "cv_iterations.json"
     try:
@@ -143,7 +143,7 @@ async def apply_to_target(company_id: str):
     if target.status != "pending":
         raise HTTPException(status_code=400, detail="Target is not pending")
 
-    target_dir = Path(settings.DATA_DIR) / "applications" / company_id
+    target_dir = json_store.get_applications_dir() / company_id
     cv_pdf = target_dir / "cv.pdf"
     cl_pdf = target_dir / "cover_letter.pdf"
 
@@ -203,7 +203,7 @@ async def batch_apply_stream(request: Request):
                     yield f"data: LIMIT_REACHED|{settings.MAX_DAILY_APPLICATIONS}\n\n"
                     return
 
-                target_dir = Path(settings.DATA_DIR) / "applications" / target.company_id
+                target_dir = json_store.get_applications_dir() / target.company_id
                 cv_pdf = target_dir / "cv.pdf"
                 cl_pdf = target_dir / "cover_letter.pdf"
 

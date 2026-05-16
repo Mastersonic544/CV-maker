@@ -154,17 +154,45 @@ async def _filter_targets_by_language(targets: list[TargetCompany], langs: list[
         return targets
 
 
+def _extract_skills(profile_data: dict) -> list:
+    raw = profile_data.get("skills") or profile_data.get("technical_skills") or {}
+    if isinstance(raw, list):
+        return [s.get("name", "") if isinstance(s, dict) else str(s) for s in raw if s][:20]
+    if isinstance(raw, dict):
+        result = []
+        for items in raw.values():
+            if isinstance(items, list):
+                for item in items:
+                    result.append(item.get("name", "") if isinstance(item, dict) else str(item))
+        return [s for s in result if s][:20]
+    return []
+
+
 @router.post("/scrape")
 async def scrape_jobs(params: ScrapeRequest):
     try:
+        # Extract profile context for relevance scoring and filter params
+        profile_skills: list = []
+        work_experience: list = []
+        preferences: dict = {}
+        try:
+            profile_data = json_store.read_raw_profile()
+            profile_skills  = _extract_skills(profile_data)
+            work_experience = profile_data.get("work_experience") or profile_data.get("experience") or []
+            preferences     = profile_data.get("preferences_and_goals") or {}
+        except Exception as profile_err:
+            logger.warning(f"Could not read profile for scrape context: {profile_err}")
+
         targets = await scrape_linkedin_jobs(
             role=params.role,
             location=params.location,
-            radius_km=params.radius_km
+            radius_km=params.radius_km,
+            profile_skills=profile_skills,
+            work_experience=work_experience,
+            preferences=preferences,
         )
         
         try:
-            profile_data = json_store.read_raw_profile()
             langs = [
                 l.get("language") for l in profile_data.get("personal_info", {}).get("languages", [])
                 if l.get("language")

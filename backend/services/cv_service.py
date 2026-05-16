@@ -11,6 +11,7 @@ from backend.config import settings
 from backend.services.apify_service import scrape_company_profile, scrape_person_posts
 from backend.services.groq_service import call_groq, _log_groq_decision
 from backend.models.schemas import TargetCompany, HiringPersona
+from backend.storage import json_store
 
 logger = logging.getLogger(__name__)
 
@@ -597,7 +598,7 @@ async def research_company(company_id: str, target: TargetCompany) -> HiringPers
         persona = _coerce_persona(persona_dict)
 
     # Persist meta.json
-    target_dir = Path(settings.DATA_DIR) / "applications" / company_id
+    target_dir = json_store.get_applications_dir() / company_id
     target_dir.mkdir(parents=True, exist_ok=True)
     meta_path = target_dir / "meta.json"
     meta_content = {
@@ -813,7 +814,7 @@ async def run_gan_loop(
             best_doc["header"]["profile_picture"] = pic_url
 
     # Persist final JSON + iterations
-    target_dir = Path(settings.DATA_DIR) / "applications" / company_id
+    target_dir = json_store.get_applications_dir() / company_id
     target_dir.mkdir(parents=True, exist_ok=True)
 
     out_path = target_dir / f"{doc_type}.json"

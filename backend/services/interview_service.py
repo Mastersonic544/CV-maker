@@ -17,7 +17,7 @@ async def start_session(company_id: str) -> InterviewSession:
     target = meta.company_info
     persona = meta.persona
     
-    cv_path = Path(settings.DATA_DIR) / "applications" / company_id / "cv.json"
+    cv_path = json_store.get_applications_dir() / company_id / "cv.json"
     with open(cv_path, "r", encoding="utf-8") as f:
         cv_data = json.load(f)
         

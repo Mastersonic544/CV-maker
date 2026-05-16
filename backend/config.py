@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     DECISIONS_LOG: Path = LOGS_DIR / "decisions.log"
     DEBUG_LOG: Path = LOGS_DIR / "debug.log"
 
+    # Multi-user paths
+    USERS_DIR: Path = DATA_DIR / "users"
+    USERS_INDEX_FILE: Path = DATA_DIR / "users.json"
+
     # Behavioral Constants
     MAX_GAN_ITERATIONS: int = 2
     MAX_DAILY_APPLICATIONS: int = 20

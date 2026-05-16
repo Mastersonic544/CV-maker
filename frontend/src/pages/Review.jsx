@@ -412,17 +412,18 @@ const Review = () => {
       const completedStates = {};
       await Promise.all(pendingTargets.map(async (t) => {
         try {
-          const [iterResult, clResult] = await Promise.allSettled([
-            apiClient.getGANIterations(t.company_id),
-            apiClient.getCLJson(t.company_id),
-          ]);
-          const iterations = iterResult.status === 'fulfilled' ? iterResult.value : null;
+          const iterations = await apiClient.getGANIterations(t.company_id);
           if (iterations && iterations.length > 0) {
             const finalScore = iterations[iterations.length - 1].score;
-            const clReady = clResult.status === 'fulfilled' ? Date.now() : null;
+            // Only check CL existence if CV has already been generated
+            let clReady = null;
+            try {
+              await apiClient.getCLJson(t.company_id);
+              clReady = Date.now();
+            } catch (_) { /* CL not yet generated — expected */ }
             completedStates[t.company_id] = { score: finalScore, clReady };
           }
-        } catch (e) { }
+        } catch (_) { }
       }));
       setCompleted(prev => ({ ...prev, ...completedStates }));
 

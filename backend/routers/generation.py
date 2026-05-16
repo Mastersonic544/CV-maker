@@ -55,7 +55,7 @@ async def _generation_workflow(company_id: str, doc_type: str):
         )
 
         await broadcast_status(company_id, "🎨 Rendering PDF...")
-        target_dir = Path(settings.DATA_DIR) / "applications" / company_id
+        target_dir = json_store.get_applications_dir() / company_id
         pdf_path = target_dir / f"{doc_type}.pdf"
         await render_cv_to_pdf(gan_result["doc"], str(pdf_path), doc_type=doc_type)
 
@@ -127,13 +127,13 @@ def _get_pdf_response(pdf_path: Path, filename: str) -> FileResponse:
 
 @router.get("/cv/{company_id}")
 async def get_cv_pdf(company_id: str):
-    pdf_path = Path(settings.DATA_DIR) / "applications" / company_id / "cv.pdf"
+    pdf_path = json_store.get_applications_dir() / company_id / "cv.pdf"
     return _get_pdf_response(pdf_path, f"CV_{company_id}.pdf")
 
 
 @router.get("/cover-letter/{company_id}")
 async def get_cl_pdf(company_id: str):
-    pdf_path = Path(settings.DATA_DIR) / "applications" / company_id / "cover_letter.pdf"
+    pdf_path = json_store.get_applications_dir() / company_id / "cover_letter.pdf"
     return _get_pdf_response(pdf_path, f"CoverLetter_{company_id}.pdf")
 
 
@@ -141,7 +141,7 @@ async def get_cl_pdf(company_id: str):
 
 @router.get("/cv/json/{company_id}")
 async def get_cv_json(company_id: str):
-    json_path = Path(settings.DATA_DIR) / "applications" / company_id / "cv.json"
+    json_path = json_store.get_applications_dir() / company_id / "cv.json"
     if not json_path.exists():
         raise HTTPException(status_code=404, detail="CV JSON not found.")
     with open(json_path, "r", encoding="utf-8") as f:
@@ -150,7 +150,7 @@ async def get_cv_json(company_id: str):
 
 @router.patch("/cv/{company_id}")
 async def update_cv(company_id: str, cv_json: dict):
-    target_dir = Path(settings.DATA_DIR) / "applications" / company_id
+    target_dir = json_store.get_applications_dir() / company_id
     json_path = target_dir / "cv.json"
     pdf_path = target_dir / "cv.pdf"
     with open(json_path, "w", encoding="utf-8") as f:
@@ -182,7 +182,7 @@ async def optimize_cv(cv_json: dict):
 
 @router.get("/cover-letter/json/{company_id}")
 async def get_cl_json(company_id: str):
-    json_path = Path(settings.DATA_DIR) / "applications" / company_id / "cover_letter.json"
+    json_path = json_store.get_applications_dir() / company_id / "cover_letter.json"
     if not json_path.exists():
         raise HTTPException(status_code=404, detail="Cover Letter JSON not found.")
     with open(json_path, "r", encoding="utf-8") as f:
@@ -191,7 +191,7 @@ async def get_cl_json(company_id: str):
 
 @router.patch("/cover-letter/{company_id}")
 async def update_cl(company_id: str, cl_json: dict):
-    target_dir = Path(settings.DATA_DIR) / "applications" / company_id
+    target_dir = json_store.get_applications_dir() / company_id
     json_path = target_dir / "cover_letter.json"
     pdf_path = target_dir / "cover_letter.pdf"
     with open(json_path, "w", encoding="utf-8") as f:
@@ -205,7 +205,7 @@ async def update_cl(company_id: str, cl_json: dict):
 @router.get("/meta/{company_id}")
 async def get_application_meta(company_id: str):
     """Returns persona, scraped data, and target info for a company."""
-    meta_path = Path(settings.DATA_DIR) / "applications" / company_id / "meta.json"
+    meta_path = json_store.get_applications_dir() / company_id / "meta.json"
     if not meta_path.exists():
         raise HTTPException(status_code=404, detail="Research data not found. Run generation first.")
     with open(meta_path, "r", encoding="utf-8") as f:
@@ -215,7 +215,7 @@ async def get_application_meta(company_id: str):
 @router.get("/iterations/{company_id}")
 async def get_gan_iterations(company_id: str):
     """Returns the GAN loop scoring history for a company's CV."""
-    iter_path = Path(settings.DATA_DIR) / "applications" / company_id / "cv_iterations.json"
+    iter_path = json_store.get_applications_dir() / company_id / "cv_iterations.json"
     if not iter_path.exists():
         return []
     with open(iter_path, "r", encoding="utf-8") as f:
@@ -228,7 +228,7 @@ async def explain_insight(company_id: str, body: dict):
     insight_type = body.get("insight_type", "")
     insight_value = body.get("insight_value", "")
 
-    meta_path = Path(settings.DATA_DIR) / "applications" / company_id / "meta.json"
+    meta_path = json_store.get_applications_dir() / company_id / "meta.json"
     if not meta_path.exists():
         raise HTTPException(status_code=404, detail="Research data not found. Run generation first.")
 

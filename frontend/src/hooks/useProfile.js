@@ -7,7 +7,7 @@ import { apiClient } from '../api/client';
  */
 export const useProfile = () => {
   const [profile, setProfile] = useState(null);
-  const [completeness, setCompleteness] = useState({ score: 0, missing_fields: [] });
+  const [completeness, setCompleteness] = useState({ score: 0, missing_fields: [], ai_pending: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -53,6 +53,7 @@ export const useProfile = () => {
     error,
     completenessScore: completeness.score,
     missingFields: completeness.missing_fields,
+    aiPendingFields: completeness.ai_pending || [],
     updateProfile,
     refreshProfile: fetchAll,
   };

@@ -1,22 +1,24 @@
 import React, { useState } from 'react';
-import { User, MapPin, Briefcase, Sparkles, X, Check, AlertCircle, RefreshCw } from 'lucide-react';
+import { User, MapPin, Briefcase, X, Check, AlertCircle, RefreshCw, Sparkles } from 'lucide-react';
+import { usersClient } from '../api/client';
 
 /**
- * ProfileCard — Reusable component displaying profile overview with
+ * ProfileCard. Reusable component displaying profile overview with
  * completeness score, missing field chips, and inline editing.
  *
  * Props:
- *   profile       — the full profile object
- *   completenessScore — float 0-100
- *   missingFields — array of missing field label strings
- *   onUpdate      — async (updates) => void — called to PATCH profile
- *   loading       — boolean
+ *   profile             the full profile object
+ *   completenessScore   float 0-100
+ *   missingFields       array of missing field label strings
+ *   onUpdate            async (updates) => void. Called to PATCH profile
+ *   loading             boolean
  */
-const ProfileCard = ({ profile, completenessScore, missingFields, onUpdate, onRefresh, loading }) => {
+const ProfileCard = ({ profile, user, completenessScore, missingFields, aiPendingFields = [], onUpdate, onRefresh, onAiFill, loading }) => {
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [filling, setFilling] = useState(false);
 
   const handleRefresh = async () => {
     if (!onRefresh || refreshing) return;
@@ -24,15 +26,24 @@ const ProfileCard = ({ profile, completenessScore, missingFields, onUpdate, onRe
     try { await onRefresh(); } finally { setRefreshing(false); }
   };
 
+  const handleAiFill = async () => {
+    if (!onAiFill || filling) return;
+    setFilling(true);
+    try { await onAiFill(); } finally { setFilling(false); }
+  };
+
   if (loading) {
     return (
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-8 animate-pulse">
-        <div className="flex items-center gap-6">
-          <div className="w-20 h-20 rounded-full bg-zinc-800" />
+      <div
+        className="p-8 animate-pulse"
+        style={{ background: 'var(--cv-card-bg)', border: '1px solid var(--cv-border)' }}
+      >
+        <div className="flex items-center gap-6 flex-wrap">
+          <div className="w-20 h-20" style={{ background: 'rgba(var(--cv-text-rgb), 0.05)' }} />
           <div className="flex-1 space-y-3">
-            <div className="h-6 bg-zinc-800 rounded w-48" />
-            <div className="h-4 bg-zinc-800 rounded w-64" />
-            <div className="h-3 bg-zinc-800 rounded w-32" />
+            <div className="h-6 w-48" style={{ background: 'rgba(var(--cv-text-rgb), 0.05)' }} />
+            <div className="h-4 w-64" style={{ background: 'rgba(var(--cv-text-rgb), 0.05)' }} />
+            <div className="h-3 w-32" style={{ background: 'rgba(var(--cv-text-rgb), 0.05)' }} />
           </div>
         </div>
       </div>
@@ -49,18 +60,18 @@ const ProfileCard = ({ profile, completenessScore, missingFields, onUpdate, onRe
   const city = location.city || '';
   const country = location.country || '';
   const locationStr = [city, country].filter(Boolean).join(', ');
-  const avatarUrl = contact.profile_picture;
+  const uploadedAvatarUrl = user?.has_avatar
+    ? usersClient.getAvatarUrl(user.user_id, user.avatar_updated_at)
+    : null;
+  const avatarUrl = uploadedAvatarUrl || contact.profile_picture;
 
-  // Color logic for progress bar
-  const getBarColor = (score) => {
-    if (score >= 80) return { bar: 'bg-emerald-500', glow: 'shadow-emerald-500/20', text: 'text-emerald-400' };
-    if (score >= 50) return { bar: 'bg-amber-500', glow: 'shadow-amber-500/20', text: 'text-amber-400' };
-    return { bar: 'bg-red-500', glow: 'shadow-red-500/20', text: 'text-red-400' };
+  const getColor = (score) => {
+    if (score >= 80) return { stroke: '#10b981', text: '#34d399' };
+    if (score >= 50) return { stroke: '#f59e0b', text: '#fbbf24' };
+    return { stroke: '#f87171', text: '#f87171' };
   };
+  const c = getColor(completenessScore);
 
-  const colors = getBarColor(completenessScore);
-
-  // Map missing field labels to the PATCH update path
   const fieldEditMap = {
     email: { path: 'personal_info.contact.email', label: 'Email', placeholder: 'you@example.com' },
     phone: { path: 'personal_info.contact.phone', label: 'Phone', placeholder: '+1234567890' },
@@ -86,19 +97,21 @@ const ProfileCard = ({ profile, completenessScore, missingFields, onUpdate, onRe
 
   const handleChipClick = (field) => {
     const config = fieldEditMap[field];
-    if (!config?.path) return; // non-editable
+    if (!config?.path) return;
     setEditingField(field);
 
+    // Always resolve current value from profile so AI-filled fields are pre-populated
+    const parts = config.path.split('.');
+    let current = profile;
+    for (const part of parts) {
+      if (current === undefined || current === null) break;
+      current = current[part];
+    }
+
     if (config.isJson) {
-      const parts = config.path.split('.');
-      let current = profile;
-      for (const part of parts) {
-        if (current === undefined || current === null) break;
-        current = current[part];
-      }
       setEditValue(current ? JSON.stringify(current, null, 2) : '[\n  \n]');
     } else {
-      setEditValue('');
+      setEditValue(current ? String(current) : '');
     }
   };
 
@@ -129,11 +142,22 @@ const ProfileCard = ({ profile, completenessScore, missingFields, onUpdate, onRe
       current[parts[parts.length - 1]] = finalValue;
 
       await onUpdate(update);
+
+      // If this was an AI-pending field, approve it and refresh
+      if (aiPendingFields.includes(editingField) && user?.user_id) {
+        try {
+          await usersClient.approveAiFields(user.user_id, editingField);
+          if (onRefresh) await onRefresh();
+        } catch (approveErr) {
+          console.warn('Failed to approve AI field:', approveErr);
+        }
+      }
+
       setEditingField(null);
       setEditValue('');
     } catch (err) {
       console.error('Failed to update field:', err);
-      alert('Failed to save: ' + (err.response?.data?.detail || err.message || 'Validation error'));
+      alert('Failed to save: ' + (err.message || 'Validation error'));
     } finally {
       setSaving(false);
     }
@@ -144,115 +168,234 @@ const ProfileCard = ({ profile, completenessScore, missingFields, onUpdate, onRe
     setEditValue('');
   };
 
+  // Radial progress geometry
+  const radius = 36;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - completenessScore / 100);
+
   return (
-    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden">
-      {/* Gradient top accent */}
-      <div className="h-1 bg-gradient-to-r from-[#6C63FF] via-purple-500 to-pink-500" />
+    <div
+      className="overflow-hidden"
+      style={{
+        background: 'var(--cv-card-bg)',
+        border: '1px solid var(--cv-border)',
+      }}
+    >
+      {/* Top scan accent */}
+      <div
+        className="h-[2px]"
+        style={{ background: 'linear-gradient(to right, var(--cv-cyan), rgba(108,99,255,0.5), transparent)' }}
+      />
 
       <div className="p-8">
-        {/* Profile header */}
-        <div className="flex items-start gap-6 mb-6">
+        {/* Header */}
+        <div className="flex items-start gap-6 mb-8 flex-wrap">
           {/* Avatar */}
           <div className="relative flex-shrink-0">
             {avatarUrl ? (
               <img
                 src={avatarUrl}
                 alt={fullName}
-                className="w-20 h-20 rounded-full object-cover border-2 border-zinc-700 shadow-lg"
+                className="w-20 h-20 object-cover"
+                style={{ border: '1px solid rgba(var(--cv-text-rgb), 0.1)' }}
               />
             ) : (
-              <div className="w-20 h-20 rounded-full bg-zinc-800 border-2 border-zinc-700 flex items-center justify-center">
-                <User className="w-8 h-8 text-zinc-500" />
+              <div
+                className="w-20 h-20 flex items-center justify-center"
+                style={{
+                  background: 'rgba(var(--cv-cyan-rgb), 0.04)',
+                  border: '1px solid rgba(var(--cv-cyan-rgb), 0.2)',
+                }}
+              >
+                <User className="w-8 h-8" style={{ color: 'rgba(var(--cv-cyan-rgb), 0.5)' }} />
               </div>
             )}
-            <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full ${colors.bar} flex items-center justify-center shadow-lg ${colors.glow}`}>
-              <Sparkles className="w-3 h-3 text-white" />
-            </div>
           </div>
 
           {/* Info */}
           <div className="flex-1 min-w-0">
-            <h2 className="text-2xl font-bold text-white tracking-tight truncate">{fullName}</h2>
+            <div className="flex items-center gap-3 mb-1">
+              <span style={{ width: 16, height: 1, background: 'var(--cv-cyan)' }} />
+              <p
+                className="font-dm"
+                style={{ fontSize: '0.55rem', letterSpacing: '0.22em', textTransform: 'uppercase', color: 'var(--cv-cyan)' }}
+              >
+                Operator
+              </p>
+            </div>
+            <h2
+              className="font-syne truncate"
+              style={{ fontWeight: 800, fontSize: '1.65rem', letterSpacing: '-0.03em', color: 'var(--cv-text)', lineHeight: 1.05 }}
+            >
+              {fullName}
+            </h2>
             {headline && (
-              <p className="text-zinc-400 mt-1 flex items-center gap-2">
-                <Briefcase className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+              <p
+                className="font-dm flex items-center gap-2 mt-2"
+                style={{ fontSize: '0.72rem', color: 'rgba(var(--cv-text-rgb), 0.7)' }}
+              >
+                <Briefcase className="w-3 h-3 flex-shrink-0" style={{ color: 'rgba(var(--cv-text-rgb), 0.42)' }} />
                 <span className="truncate">{headline}</span>
               </p>
             )}
             {locationStr && (
-              <p className="text-zinc-500 text-sm mt-1 flex items-center gap-2">
-                <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+              <p
+                className="font-dm flex items-center gap-2 mt-1"
+                style={{ fontSize: '0.65rem', letterSpacing: '0.08em', color: 'rgba(var(--cv-text-rgb), 0.55)' }}
+              >
+                <MapPin className="w-3 h-3 flex-shrink-0" />
                 <span>{locationStr}</span>
               </p>
             )}
           </div>
 
-          {/* Score badge + refresh */}
-          <div className="flex-shrink-0 flex flex-col items-end gap-2">
-            <div className={`px-4 py-2 rounded-xl border ${completenessScore >= 80
-                ? 'bg-emerald-500/10 border-emerald-500/20'
-                : completenessScore >= 50
-                  ? 'bg-amber-500/10 border-amber-500/20'
-                  : 'bg-red-500/10 border-red-500/20'
-              }`}>
-              <div className={`text-2xl font-bold font-mono ${colors.text}`}>
-                {completenessScore}%
-              </div>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500 text-center">
-                Complete
+          {/* Radial progress */}
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            <div className="relative w-24 h-24 flex items-center justify-center">
+              <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 88 88">
+                <circle cx="44" cy="44" r={radius} fill="none" stroke="rgba(var(--cv-text-rgb), 0.1)" strokeWidth="3" />
+                <circle
+                  cx="44" cy="44" r={radius}
+                  fill="none"
+                  stroke={c.stroke}
+                  strokeWidth="3"
+                  strokeDasharray={`${circumference}`}
+                  strokeDashoffset={`${offset}`}
+                  style={{ transition: 'stroke-dashoffset 1s ease-out', filter: `drop-shadow(0 0 6px ${c.stroke}80)` }}
+                />
+              </svg>
+              <div className="text-center">
+                <div
+                  className="font-syne"
+                  style={{ fontWeight: 800, fontSize: '1.4rem', letterSpacing: '-0.03em', color: c.text, lineHeight: 1 }}
+                >
+                  {completenessScore}
+                </div>
+                <div
+                  className="font-dm mt-0.5"
+                  style={{
+                    fontSize: '0.5rem',
+                    letterSpacing: '0.22em',
+                    textTransform: 'uppercase',
+                    color: 'rgba(var(--cv-text-rgb), 0.42)',
+                  }}
+                >
+                  Complete
+                </div>
               </div>
             </div>
-            {onRefresh && (
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                title="Re-check completeness from file"
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-zinc-400
-                           hover:text-white bg-zinc-800/60 hover:bg-zinc-700 border border-zinc-700
-                           rounded-lg transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
-                Check Again
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Profile Completeness</span>
-            <span className={`text-xs font-mono ${colors.text}`}>{completenessScore}/100</span>
-          </div>
-          <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-            <div
-              className={`h-full ${colors.bar} rounded-full transition-all duration-1000 ease-out shadow-lg ${colors.glow}`}
-              style={{ width: `${completenessScore}%` }}
-            />
+            <div className="flex gap-2">
+              {onAiFill && (
+                <button
+                  onClick={handleAiFill}
+                  disabled={filling}
+                  title="AI auto-fill missing fields"
+                  className="font-dm flex items-center gap-1.5 px-2.5 py-1 transition-all"
+                  style={{
+                    fontSize: '0.55rem',
+                    letterSpacing: '0.18em',
+                    textTransform: 'uppercase',
+                    color: filling ? 'rgba(var(--cv-cyan-rgb), 0.55)' : 'var(--cv-cyan)',
+                    background: 'rgba(var(--cv-cyan-rgb), 0.06)',
+                    border: '1px solid rgba(var(--cv-cyan-rgb), 0.25)',
+                    opacity: filling ? 0.7 : 1,
+                  }}
+                >
+                  <Sparkles className={`w-2.5 h-2.5 ${filling ? 'animate-pulse' : ''}`} />
+                  {filling ? 'Filling...' : 'AI Fill'}
+                </button>
+              )}
+              {onRefresh && (
+                <button
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  title="Re-check completeness"
+                  className="font-dm flex items-center gap-1.5 px-2.5 py-1 transition-colors"
+                  style={{
+                    fontSize: '0.55rem',
+                    letterSpacing: '0.18em',
+                    textTransform: 'uppercase',
+                    color: 'rgba(var(--cv-text-rgb), 0.55)',
+                    background: 'var(--cv-card-bg)',
+                    border: '1px solid var(--cv-border)',
+                  }}
+                >
+                  <RefreshCw className={`w-2.5 h-2.5 ${refreshing ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Missing fields chips */}
         {missingFields && missingFields.length > 0 && (
           <div>
-            <div className="flex items-center gap-2 mb-3">
-              <AlertCircle className="w-4 h-4 text-zinc-500" />
-              <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Missing Fields</span>
+            <div className="flex items-center gap-3 mb-3">
+              <AlertCircle className="w-3 h-3" style={{ color: 'rgba(var(--cv-text-rgb), 0.42)' }} />
+              <span
+                className="font-dm"
+                style={{ fontSize: '0.58rem', letterSpacing: '0.22em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.55)' }}
+              >
+                Missing fields
+              </span>
+              <span
+                className="font-dm"
+                style={{ fontSize: '0.58rem', color: 'rgba(var(--cv-text-rgb), 0.32)' }}
+              >
+                — click to edit
+              </span>
             </div>
             <div className="flex flex-wrap gap-2">
               {missingFields.map((field) => {
                 const config = fieldEditMap[field] || { label: field };
-                const isEditable = config?.path;
+                const isEditable = !!config?.path;
+                const isPending = aiPendingFields.includes(field);
+
+                if (isPending) {
+                  return (
+                    <button
+                      key={field}
+                      onClick={() => handleChipClick(field)}
+                      title="AI suggested — click to review and approve"
+                      className="font-dm inline-flex items-center gap-1.5 px-2.5 py-1 transition-all"
+                      style={{
+                        fontSize: '0.6rem',
+                        letterSpacing: '0.1em',
+                        background: 'rgba(139,92,246,0.07)',
+                        border: '1px solid rgba(139,92,246,0.3)',
+                        color: '#a78bfa',
+                        cursor: 'pointer',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(139,92,246,0.15)';
+                        e.currentTarget.style.borderColor = 'rgba(139,92,246,0.5)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(139,92,246,0.07)';
+                        e.currentTarget.style.borderColor = 'rgba(139,92,246,0.3)';
+                      }}
+                    >
+                      <Sparkles className="w-2.5 h-2.5" style={{ color: '#a78bfa', flexShrink: 0 }} />
+                      {config.label}
+                    </button>
+                  );
+                }
 
                 return (
                   <button
                     key={field}
                     onClick={() => isEditable && handleChipClick(field)}
                     disabled={!isEditable}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${isEditable
-                        ? 'bg-[#6C63FF]/10 border border-[#6C63FF]/20 text-[#6C63FF] hover:bg-[#6C63FF]/20 hover:border-[#6C63FF]/40 cursor-pointer'
-                        : 'bg-zinc-800/50 border border-zinc-700/50 text-zinc-500 cursor-default'
-                      }`}
+                    className="font-dm inline-flex items-center px-2.5 py-1 transition-all"
+                    style={{
+                      fontSize: '0.6rem',
+                      letterSpacing: '0.1em',
+                      background: isEditable ? 'rgba(var(--cv-cyan-rgb), 0.05)' : 'var(--cv-card-bg)',
+                      border: `1px solid ${isEditable ? 'rgba(var(--cv-cyan-rgb), 0.25)' : 'rgba(var(--cv-text-rgb), 0.06)'}`,
+                      color: isEditable ? 'var(--cv-cyan)' : 'rgba(var(--cv-text-rgb), 0.32)',
+                      cursor: isEditable ? 'pointer' : 'default',
+                    }}
                   >
                     {config.label}
                   </button>
@@ -264,19 +407,43 @@ const ProfileCard = ({ profile, completenessScore, missingFields, onUpdate, onRe
 
         {/* Inline edit form */}
         {editingField && (
-          <div className="mt-4 p-4 bg-zinc-800/50 border border-zinc-700 rounded-xl animate-in slide-in-from-top-2">
+          <div
+            className="mt-5 p-4"
+            style={{
+              background: 'var(--cv-bg)',
+              border: aiPendingFields.includes(editingField)
+                ? '1px solid rgba(139,92,246,0.3)'
+                : '1px solid rgba(var(--cv-cyan-rgb), 0.2)',
+            }}
+          >
             <div className="flex items-center gap-2 mb-3">
-              <span className="text-sm font-medium text-white">
-                Edit: {fieldEditMap[editingField]?.label}
-              </span>
+              {aiPendingFields.includes(editingField) ? (
+                <>
+                  <Sparkles className="w-3 h-3" style={{ color: '#a78bfa' }} />
+                  <span
+                    className="font-dm"
+                    style={{ fontSize: '0.58rem', letterSpacing: '0.22em', textTransform: 'uppercase', color: '#a78bfa' }}
+                  >
+                    AI Fill · Review &amp; Approve · {fieldEditMap[editingField]?.label}
+                  </span>
+                </>
+              ) : (
+                <span
+                  className="font-dm"
+                  style={{ fontSize: '0.58rem', letterSpacing: '0.22em', textTransform: 'uppercase', color: 'var(--cv-cyan)' }}
+                >
+                  Edit · {fieldEditMap[editingField]?.label}
+                </span>
+              )}
             </div>
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-3 flex-wrap">
               {fieldEditMap[editingField]?.type === 'textarea' ? (
                 <textarea
                   value={editValue}
                   onChange={(e) => setEditValue(e.target.value)}
                   placeholder={fieldEditMap[editingField]?.placeholder}
-                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-[#6C63FF]/50 focus:border-[#6C63FF]/50 transition-all font-mono min-h-[150px]"
+                  className="cv-input flex-1"
+                  style={{ minHeight: 150, fontFamily: "'DM Mono', monospace", fontSize: '0.68rem', lineHeight: 1.6 }}
                   autoFocus
                 />
               ) : (
@@ -285,7 +452,7 @@ const ProfileCard = ({ profile, completenessScore, missingFields, onUpdate, onRe
                   value={editValue}
                   onChange={(e) => setEditValue(e.target.value)}
                   placeholder={fieldEditMap[editingField]?.placeholder}
-                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-[#6C63FF]/50 focus:border-[#6C63FF]/50 transition-all"
+                  className="cv-input flex-1"
                   autoFocus
                   onKeyDown={(e) => e.key === 'Enter' && handleSave()}
                 />
@@ -294,19 +461,30 @@ const ProfileCard = ({ profile, completenessScore, missingFields, onUpdate, onRe
                 <button
                   onClick={handleSave}
                   disabled={saving || !editValue.trim()}
-                  className="p-2.5 bg-[#6C63FF] hover:bg-[#5B54E6] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                  className="p-2.5 flex items-center justify-center"
+                  style={{
+                    background: '#6C63FF',
+                    color: '#fff',
+                    border: 'none',
+                    opacity: (saving || !editValue.trim()) ? 0.45 : 1,
+                  }}
                 >
                   {saving ? (
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
-                    <Check className="w-4 h-4 text-white" />
+                    <Check className="w-4 h-4" />
                   )}
                 </button>
                 <button
                   onClick={handleCancel}
-                  className="p-2.5 bg-zinc-700 hover:bg-zinc-600 rounded-lg transition-colors flex items-center justify-center"
+                  className="p-2.5 flex items-center justify-center"
+                  style={{
+                    background: 'var(--cv-card-hover)',
+                    color: 'rgba(var(--cv-text-rgb), 0.7)',
+                    border: '1px solid rgba(var(--cv-text-rgb), 0.1)',
+                  }}
                 >
-                  <X className="w-4 h-4 text-zinc-300" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>

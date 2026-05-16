@@ -14,6 +14,45 @@ const request = async (endpoint, options = {}) => {
   return data;
 };
 
+export const usersClient = {
+  // User CRUD
+  listUsers: () => request("/users/"),
+  getActiveUser: () => request("/users/active"),
+  createUser: (name, avatarColor) => request("/users/", { method: "POST", body: JSON.stringify({ name, avatar_color: avatarColor }) }),
+  switchUser: (userId) => request(`/users/switch/${userId}`, { method: "POST" }),
+  updateUser: (userId, fields) => request(`/users/${userId}`, { method: "PATCH", body: JSON.stringify(fields) }),
+  deleteUser: (userId) => request(`/users/${userId}`, { method: "DELETE" }),
+
+  // API Keys
+  getApiKeysMeta: (userId) => request(`/users/${userId}/api-keys`),
+  getApiKeysDecrypted: (userId) => request(`/users/${userId}/api-keys/export`),
+  setApiKey: (userId, keyName, value) => request(`/users/${userId}/api-keys/${keyName}`, { method: "PUT", body: JSON.stringify({ value }) }),
+  deleteApiKey: (userId, keyName) => request(`/users/${userId}/api-keys/${keyName}`, { method: "DELETE" }),
+  testApiKey: (userId, keyName, value) => request(`/users/${userId}/api-keys/${keyName}/test`, { method: "POST", body: JSON.stringify({ value }) }),
+
+  // Avatar
+  uploadAvatar: async (userId, file) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE_URL}/users/${userId}/avatar`, { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Upload failed");
+    return data;
+  },
+  getAvatarUrl: (userId, updatedAt) =>
+    `${BASE_URL}/users/${userId}/avatar${updatedAt ? `?v=${updatedAt}` : ""}`,
+
+  // Onboarding
+  submitOnboarding: (userId, payload) => request(`/users/${userId}/onboarding`, { method: "POST", body: JSON.stringify(payload) }),
+
+  // Profile JSON management
+  getProfileJson: (userId) => request(`/users/${userId}/profile-json`),
+  updateProfileJson: (userId, data) => request(`/users/${userId}/profile-json`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteProfileSection: (userId, section) => request(`/users/${userId}/profile-json/section`, { method: "DELETE", body: JSON.stringify({ section }) }),
+  aiFillProfile: (userId) => request(`/users/${userId}/profile-json/ai-fill`, { method: "POST" }),
+  approveAiFields: (userId, field = null) => request(`/users/${userId}/profile-json/approve`, { method: "POST", body: JSON.stringify(field ? { field } : {}) }),
+};
+
 export const apiClient = {
   // Profile
   getProfile: () => request("/profile/"),

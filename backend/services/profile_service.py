@@ -118,30 +118,38 @@ def _is_field_filled(value: Any) -> bool:
     return True
 
 
+def get_raw_missing_labels(profile: Dict[str, Any]) -> set:
+    """
+    Return the set of field label IDs that are actually empty in the profile data.
+    Ignores _ai_pending — use this to compare before/after an AI fill operation.
+    """
+    if not profile or not isinstance(profile, dict):
+        return {f[2] for f in COMPLETENESS_FIELDS}
+    return {
+        label
+        for path, _, label in COMPLETENESS_FIELDS
+        if not _is_field_filled(_resolve_field(profile, path))
+    }
+
+
 def calculate_completeness(profile: Dict[str, Any]) -> Dict[str, Any]:
     """
     Calculate a weighted completeness score for the profile.
 
     Checks every field defined in COMPLETENESS_FIELDS against the profile data.
-    Returns a score (0-100) and list of missing field labels.
+    Returns a score (0-100), list of missing field labels, and ai_pending list.
 
-    Args:
-        profile: The raw profile dictionary from profile.json.
-
-    Returns:
-        dict with keys:
-          - score (float): Completeness percentage 0-100
-          - missing_fields (list[str]): Display labels of missing fields
-
-    Raises:
-        ValueError: If profile is None or not a dict.
+    AI-pending fields (filled by AI but not yet approved by user) are kept in
+    missing_fields so their chips remain visible in the dashboard, even though
+    their values already count toward the score (for CV generation purposes).
     """
     if not profile or not isinstance(profile, dict):
-        return {"score": 0.0, "missing_fields": [f[2] for f in COMPLETENESS_FIELDS]}
+        return {"score": 0.0, "missing_fields": [f[2] for f in COMPLETENESS_FIELDS], "ai_pending": []}
 
     total_weight = sum(f[1] for f in COMPLETENESS_FIELDS)
     earned_weight = 0.0
     missing_fields = []
+    valid_labels = {f[2] for f in COMPLETENESS_FIELDS}
 
     for field_path, weight, label in COMPLETENESS_FIELDS:
         value = _resolve_field(profile, field_path)
@@ -152,10 +160,15 @@ def calculate_completeness(profile: Dict[str, Any]) -> Dict[str, Any]:
 
     score = round((earned_weight / total_weight) * 100) if total_weight > 0 else 0.0
 
-    # --- Log the decision ---
+    # Re-add AI-pending labels so their dashboard chips remain visible
+    ai_pending: List[str] = [f for f in profile.get("_ai_pending", []) if f in valid_labels]
+    for label in ai_pending:
+        if label not in missing_fields:
+            missing_fields.append(label)
+
     _log_completeness_decision(score, missing_fields, earned_weight, total_weight)
 
-    return {"score": score, "missing_fields": missing_fields}
+    return {"score": score, "missing_fields": missing_fields, "ai_pending": ai_pending}
 
 
 def _log_completeness_decision(
