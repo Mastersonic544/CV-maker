@@ -6,7 +6,7 @@ An autonomous, AI-powered platform for navigating the complete job search lifecy
 - Python 3.11+
 - Node.js 18+
 - Playwright (Chromium)
-- Brevo account (for SMTP application routing)
+- Gmail account with App Password (for SMTP email applications)
 
 ## Setup
 
@@ -14,7 +14,7 @@ An autonomous, AI-powered platform for navigating the complete job search lifecy
 2. **Environment Variables**: Copy `.env.example` to a new `.env` file and populate your API keys:
    - `OPENROUTER_API_KEY` — required for all LLM calls
    - `LINKEDIN_EMAIL`, `LINKEDIN_PASSWORD` — for Playwright automation
-   - `BREVO_SMTP_USER`, `BREVO_SMTP_PASSWORD` — for email applications
+   - `SMTP_USER`, `SMTP_PASSWORD` — Gmail address and App Password for email applications
    - `APIFY_TOKEN` — optional, for LinkedIn scraping (falls back to Playwright)
 3. **Profile**: Fill in your profile at `data/profile.json` — this is the source of truth for all CV generation.
 4. **Backend Initialization**:
@@ -50,7 +50,7 @@ npm run dev                          # http://localhost:3000
 1. **Dashboard**: Review your profile completeness score and historical application timelines.
 2. **Discovery**: Let the AI interpret your profile to recommend target job roles, then scrape real LinkedIn listings.
 3. **Review**: Run the GAN Generator/Discriminator loop to craft highly optimized CVs and cover letters targeted to specific hiring personas.
-4. **Apply Queue**: Track automated outreach via Playwright (LinkedIn Easy Apply) and Brevo SMTP with rate limiting.
+4. **Apply Queue**: Track automated outreach via Playwright (LinkedIn Easy Apply) and Gmail SMTP with rate limiting.
 5. **Interview Simulator**: Practice with an AI that role-plays as the target company's HR persona, with inline coaching and performance scoring.
 
 ## File Structure Overview

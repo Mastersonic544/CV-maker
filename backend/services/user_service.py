@@ -33,10 +33,13 @@ ACTIVE_USER_FILE = BASE_DIR / "data" / ".active_user"
 USERS_DIR = BASE_DIR / "data" / "users"
 
 SUPPORTED_KEYS = [
+    {"key": "OPENROUTER_API_KEY", "label": "OpenRouter API Key", "service": "openrouter"},
+    {"key": "GROQ_API_KEY", "label": "Groq API Key (fallback)", "service": "groq"},
     {"key": "LINKEDIN_EMAIL", "label": "LinkedIn Email", "service": "linkedin"},
     {"key": "LINKEDIN_PASSWORD", "label": "LinkedIn Password", "service": "linkedin"},
-    {"key": "BREVO_SMTP_USER", "label": "Brevo SMTP User", "service": "brevo"},
-    {"key": "BREVO_SMTP_PASSWORD", "label": "Brevo SMTP Password", "service": "brevo"},
+    {"key": "SMTP_USER", "label": "Sending Email Address", "service": "smtp"},
+    {"key": "SMTP_PASSWORD", "label": "Gmail App Password", "service": "smtp"},
+    {"key": "SENDER_NAME", "label": "Your Full Name", "service": "sender"},
 ]
 
 # ---------------------------------------------------------------------------
@@ -574,6 +577,102 @@ async def process_onboarding_dump(
     update_user(user_id, {"onboarding_complete": True})
 
     return profile
+
+
+# ---------------------------------------------------------------------------
+# Profile enrichment (incremental update without full re-onboarding)
+# ---------------------------------------------------------------------------
+
+async def enrich_profile_from_dump(user_id: str, dump_text: str) -> dict:
+    """
+    Merge new free-text data into an existing profile.json without overwriting it.
+    Only fields that are currently empty or missing are filled in; existing values
+    are preserved. Newly filled fields are marked as _ai_pending for user review.
+    """
+    from backend.services.groq_service import call_groq
+
+    profile_path = USERS_DIR / user_id / "profile.json"
+    existing: dict = {}
+    if profile_path.exists():
+        with open(profile_path, "r", encoding="utf-8") as f:
+            existing = json.load(f)
+
+    system_prompt = (
+        "You are a professional resume analyst. "
+        "The user has provided new information about themselves. "
+        "Your job is to extract structured data from this new text and return ONLY the fields "
+        "that contain new or additional information not already captured. "
+        "Return a JSON object using the same schema as the existing profile. "
+        "Rules:\n"
+        "- Include a field ONLY if the new text provides a value for it.\n"
+        "- Do NOT copy fields that are already complete in the existing profile.\n"
+        "- For array fields (work_experience, education, projects, certifications), "
+        "return only NEW entries not already present — do not duplicate existing ones.\n"
+        "- For object fields (skills, personal_info), return only the sub-keys that have new values.\n"
+        "- If nothing new is found, return an empty object {}.\n"
+        "Return ONLY valid JSON. No markdown, no explanation.\n\n"
+        "Profile schema:\n"
+        '{"personal_info":{"full_name":"","first_name":"","last_name":"","headline":"",'
+        '"summary":"","contact":{"email":"","phone":"","linkedin":"","github":"","portfolio":""},'
+        '"location":{"city":"","country":"","remote_open":true,"relocation_open":false},'
+        '"languages":[{"language":"","proficiency":""}]},'
+        '"work_experience":[{"company":"","title":"","start_date":"YYYY-MM","end_date":"YYYY-MM",'
+        '"is_current":false,"location":"","responsibilities":[],"achievements":[],"tech_stack":[]}],'
+        '"education":[{"institution":"","degree":"","field":"","start_date":"YYYY","end_date":"YYYY","grade":""}],'
+        '"skills":{"technical":[],"soft":[],"tools":[],"frameworks":[]},'
+        '"projects":[{"name":"","description":"","technologies":[],"outcome":"","url":""}],'
+        '"certifications":[{"name":"","issuer":"","issued_date":"YYYY-MM"}],'
+        '"personality_and_work_style":{"work_style":"","strengths":[],"values":[]},'
+        '"preferences_and_goals":{"target_roles":[],"target_industries":[],'
+        '"preferred_locations":[],"work_type":"remote|hybrid|onsite","open_to_relocation":false}}'
+    )
+
+    user_message = (
+        f"## Existing Profile (DO NOT repeat these — only add what's missing)\n"
+        f"{json.dumps(existing, ensure_ascii=False)}\n\n"
+        f"## New Data Provided by User\n{dump_text}"
+    )
+
+    new_data = await call_groq(
+        system_prompt=system_prompt,
+        user_message=user_message,
+        expect_json=True,
+        purpose="enrich_profile",
+    )
+
+    if not new_data or not isinstance(new_data, dict):
+        return existing
+
+    # Deep-merge: new_data fills in missing/empty values; existing values win
+    pending_fields: list = list(existing.get("_ai_pending", []))
+
+    def _deep_merge(base: dict, patch: dict, section_key: str = "") -> dict:
+        result = dict(base)
+        for k, v in patch.items():
+            if k.startswith("_"):
+                continue
+            full_key = f"{section_key}.{k}" if section_key else k
+            if k not in base or base[k] in (None, "", [], {}):
+                result[k] = v
+                if full_key not in pending_fields:
+                    pending_fields.append(full_key)
+            elif isinstance(v, dict) and isinstance(base.get(k), dict):
+                result[k] = _deep_merge(base[k], v, full_key)
+            elif isinstance(v, list) and isinstance(base.get(k), list):
+                # Append new list items that don't already exist
+                existing_reprs = {json.dumps(i, sort_keys=True) for i in base[k]}
+                additions = [i for i in v if json.dumps(i, sort_keys=True) not in existing_reprs]
+                if additions:
+                    result[k] = base[k] + additions
+                    if full_key not in pending_fields:
+                        pending_fields.append(full_key)
+        return result
+
+    merged = _deep_merge(existing, new_data)
+    merged["_ai_pending"] = pending_fields
+
+    _atomic_write_json(profile_path, merged)
+    return merged
 
 
 # ---------------------------------------------------------------------------

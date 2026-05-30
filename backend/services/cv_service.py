@@ -144,6 +144,9 @@ _CV_TEMPLATE = r"""<!DOCTYPE html>
     margin-top: 3px;
     font-weight: 400;
     letter-spacing: 0.2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .main-body { padding: 12px 22px 14px; overflow: hidden; }
@@ -437,14 +440,21 @@ def _extract_skills_list(raw) -> list:
         result = []
         for s in raw:
             result.append(s.get("name", "") if isinstance(s, dict) else str(s))
-        return [s for s in result if s][:12]
+        return [s for s in result if s][:16]
     if isinstance(raw, dict):
         result = []
-        for items in raw.values():
+        # technical and frameworks first — most relevant for ATS
+        for key in ("technical", "frameworks", "tools", "soft"):
+            items = raw.get(key) or []
             if isinstance(items, list):
                 for item in items:
                     result.append(item.get("name", "") if isinstance(item, dict) else str(item))
-        return [s for s in result if s][:12]
+        # catch any other keys
+        for key, items in raw.items():
+            if key not in ("technical", "frameworks", "tools", "soft") and isinstance(items, list):
+                for item in items:
+                    result.append(item.get("name", "") if isinstance(item, dict) else str(item))
+        return [s for s in result if s][:16]
     return []
 
 
@@ -455,12 +465,22 @@ def _slim_profile(profile: dict) -> dict:
     loc = pi.get("location", {})
 
     def trim_exp(e):
+        # Support both profile schemas: work_experience uses responsibilities/achievements/tech_stack
+        # while a pre-generated CV JSON uses bullet_points
+        responsibilities = (e.get("responsibilities") or [])[:6]
+        achievements = (e.get("achievements") or [])[:6]
+        bullet_points = (e.get("bullet_points") or [])[:6]
+        tech_stack = (e.get("tech_stack") or e.get("technologies") or [])[:8]
         return {
-            "company":       e.get("company") or e.get("organization"),
-            "role":          e.get("role") or e.get("title"),
-            "start_date":    e.get("start_date"),
-            "end_date":      e.get("end_date"),
-            "bullet_points": (e.get("bullet_points") or e.get("achievements") or [])[:3],
+            "company":          e.get("company") or e.get("organization"),
+            "role":             e.get("role") or e.get("title"),
+            "start_date":       e.get("start_date"),
+            "end_date":         e.get("end_date") or ("present" if e.get("is_current") else None),
+            "location":         e.get("location"),
+            "responsibilities": responsibilities,
+            "achievements":     achievements,
+            "bullet_points":    bullet_points,
+            "tech_stack":       tech_stack,
         }
 
     def trim_edu(e):
@@ -476,14 +496,21 @@ def _slim_profile(profile: dict) -> dict:
     def trim_proj(p):
         return {
             "name":         p.get("name"),
-            "description":  (p.get("description") or "")[:150],
-            "tech_stack":   (p.get("tech_stack") or [])[:6],
-            "bullet_points":(p.get("bullet_points") or [])[:2],
+            "description":  p.get("description") or "",
+            "technologies": p.get("technologies") or p.get("tech_stack") or [],
+            "outcome":      p.get("outcome") or "",
+            "url":          p.get("url") or "",
+            "bullet_points": p.get("bullet_points") or [],
         }
 
-    soft = profile.get("soft_skills") or []
+    # soft_skills can live at root level or inside skills.soft (onboarding schema)
+    soft = profile.get("soft_skills") or (profile.get("skills") or {}).get("soft") or []
     if isinstance(soft, dict):
-        soft = list(soft.values())[:6]
+        soft = list(soft.values())[:8]
+
+    # work_experience is the key used by the onboarding schema;
+    # experience is used by older/manual profile structures
+    raw_exp = profile.get("work_experience") or profile.get("experience") or []
 
     return {
         "name":     pi.get("full_name"),
@@ -496,17 +523,19 @@ def _slim_profile(profile: dict) -> dict:
             "github":   contact.get("github"),
             "portfolio":contact.get("portfolio"),
         },
-        "summary":        (pi.get("summary") or "")[:300],
+        "summary":        pi.get("summary") or "",
         "languages":      pi.get("languages", []),
-        "education":      [trim_edu(e) for e in (profile.get("education") or [])[:3]],
-        "experience":     [trim_exp(e) for e in (profile.get("experience") or [])[:4]],
-        "projects":       [trim_proj(p) for p in (profile.get("projects") or [])[:4]],
+        "education":      [trim_edu(e) for e in (profile.get("education") or [])[:4]],
+        "experience":     [trim_exp(e) for e in raw_exp[:5]],
+        "projects":       [trim_proj(p) for p in (profile.get("projects") or [])[:5]],
         "skills":         _extract_skills_list(profile.get("skills") or profile.get("technical_skills")),
-        "soft_skills":    soft[:6],
+        "soft_skills":    soft[:8],
         "certifications": [
-            {"name": c.get("name"), "issuer": c.get("issuer"), "date": c.get("date")}
-            for c in (profile.get("certifications") or [])[:4]
+            {"name": c.get("name"), "issuer": c.get("issuer"), "date": c.get("issued_date") or c.get("date")}
+            for c in (profile.get("certifications") or [])[:5]
         ],
+        "target_roles":   (profile.get("preferences_and_goals") or {}).get("target_roles", [])[:4],
+        "strengths":      (profile.get("personality_and_work_style") or {}).get("strengths", [])[:5],
     }
 
 
@@ -568,6 +597,11 @@ async def research_company(company_id: str, target: TargetCompany) -> HiringPers
         logger.info(f"Scraped job posting: {len(job_posting_text)} chars")
     except Exception as exc:
         logger.warning(f"Job posting scrape failed ({exc}), proceeding with minimal context")
+
+    # Fall back to user-provided description if scraping yielded nothing
+    if not job_posting_text and getattr(target, "job_description", None):
+        job_posting_text = target.job_description
+        logger.info("Using user-provided job description as fallback")
 
     # Build a compact context block even if scraping returned nothing
     context = (
@@ -729,11 +763,16 @@ async def run_gan_loop(
             await progress_callback(f"Generating {doc_type.upper()} (iteration {iter_num}/{max_loops})...")
 
         slim = _slim_profile(profile)
+        target_role_hint = (
+            f"TARGET ROLE: {company_name} — {', '.join(persona.what_they_look_for[:3]) if persona.what_they_look_for else 'see persona'}\n"
+            f"DOMAIN KEYWORDS: {', '.join(persona.cultural_keywords[:6]) if persona.cultural_keywords else 'see persona'}\n\n"
+        )
         cl_context = (
             f"Target Company: {company_name}\nToday's Date: {datetime.now().strftime('%B %Y')}\n\n"
             if doc_type == "cover_letter" and company_name else ""
         )
         gen_user_message = (
+            f"{target_role_hint}"
             f"{cl_context}"
             f"Profile:\n{json.dumps(slim)}\n\n"
             f"Persona:\n{persona.model_dump_json()}\n\n"
@@ -746,8 +785,16 @@ async def run_gan_loop(
             purpose=f"generate_{doc_type}_iter_{iter_num}"
         )
 
+        # Cover letters skip scoring — single-pass generation only
+        if doc_type == "cover_letter":
+            best_doc = doc_json
+            best_score = 10.0
+            if progress_callback:
+                await progress_callback("✅ Cover letter generated.")
+            break
+
         if progress_callback:
-            await progress_callback(f"Scoring {doc_type.upper()} (iteration {iter_num})...")
+            await progress_callback(f"Scoring CV (iteration {iter_num})...")
 
         score_user_message = f"Evaluate this document:\n{json.dumps(doc_json)}"
         eval_result = await call_groq(
@@ -777,14 +824,14 @@ async def run_gan_loop(
             "passed": passed
         })
 
-        if score > best_score:
+        if best_doc is None or score > best_score:
             best_score = score
             best_doc = doc_json
 
         if passed or score >= settings.MIN_CV_SCORE:
             if progress_callback:
                 await progress_callback(
-                    f"✅ {doc_type.upper()} achieved {score}/10 in {iter_num} iterations."
+                    f"✅ CV achieved {score}/10 in {iter_num} iterations."
                 )
             break
 
@@ -894,15 +941,33 @@ async def render_cv_to_pdf(cv_json: dict, output_path: str, doc_type: str = "cv"
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # Resolve profile picture: try base64 first, fall back to direct URL
-    pic_url = (cv_json.get("header") or {}).get("profile_picture", "")
+    # Resolve profile picture: prefer local uploaded avatar, then fall back to URL in profile
+    import base64 as _b64
+    from backend.storage import json_store as _store
+
     profile_pic: str = ""
-    if pic_url:
-        loop = asyncio.get_running_loop()
-        profile_pic = await loop.run_in_executor(None, _fetch_image_base64, pic_url)
-        if not profile_pic:
-            # Let Playwright load it directly — it behaves like a real browser
-            profile_pic = pic_url
+
+    # 1. Check for local avatar file in the active user's directory
+    user_dir = _store._user_data_dir()
+    for ext in ("jpg", "jpeg", "png", "webp", "gif"):
+        avatar_path = user_dir / f"avatar.{ext}"
+        if avatar_path.exists():
+            try:
+                raw = avatar_path.read_bytes()
+                mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+                profile_pic = f"data:{mime};base64,{_b64.b64encode(raw).decode()}"
+            except Exception as exc:
+                logger.warning(f"Could not read local avatar: {exc}")
+            break
+
+    # 2. Fall back to URL stored in the CV header (e.g. LinkedIn photo)
+    if not profile_pic:
+        pic_url = (cv_json.get("header") or {}).get("profile_picture", "")
+        if pic_url:
+            loop = asyncio.get_running_loop()
+            profile_pic = await loop.run_in_executor(None, _fetch_image_base64, pic_url)
+            if not profile_pic:
+                profile_pic = pic_url
 
     # Derive initial letter for placeholder
     name = (cv_json.get("header") or {}).get("name", "")

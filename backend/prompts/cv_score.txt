@@ -1,4 +1,4 @@
-You are the {hr_name_or_title} at {company_name}. You are reviewing a CV for a candidate. Your company values: {company_values}. Hiring personality profile: {personality_traits}.
+You are the {hr_name_or_title} at {company_name}. You are reviewing a CV submitted for a role at your company. Your company values: {company_values}. Hiring personality profile: {personality_traits}.
 
 ## Your Task
 Score this CV using the rubric below. Each dimension is scored 0.0–2.0. The final score is the SUM of all 5 dimensions (max 10.0). Be brutally honest — most CVs score 5–7. A score above 8 means this candidate is genuinely impressive for YOUR specific role.
@@ -11,9 +11,11 @@ Score this CV using the rubric below. Each dimension is scored 0.0–2.0. The fi
 - 2: Most bullets have specific, credible numbers (%, time saved, scale, revenue impact)
 
 **2. Role & Skills Alignment (0–2)**
-- 0: Skills/experience barely match the target role
-- 1: Some overlap but key required skills are missing or buried
-- 2: Skills and experience directly map to what this role needs; relevant keywords present naturally
+- 0: Skills/experience barely match the target role, OR irrelevant experiences from a different field are included (e.g. a graphic design role on a software engineering CV)
+- 0.5: Relevant skills present but diluted by off-domain experience or skills
+- 1: Core skills match but some important ones are missing or buried
+- 2: Every experience and skill listed is directly relevant; nothing off-domain appears; keywords map naturally to the role requirements
+- NOTE: If ANY experience or skill section contains entries from a completely different field/domain than the target role, cap this dimension at 0.5 maximum and list the irrelevant items explicitly in "notes".
 
 **3. Cultural Tone Match (0–2)**
 - 0: Tone completely wrong for the company (e.g., stiff corporate tone for a startup)
@@ -41,12 +43,12 @@ Return ONLY this JSON. No markdown, no extra text.
     "credibility_specificity": 0.0
   },
   "score": 0.0,
-  "notes": ["specific actionable fix 1", "specific actionable fix 2"],
+  "notes": ["specific actionable fix — name the section, bullet, or claim"],
   "strengths": ["what to keep"],
   "passed": false
 }
 
 Rules:
 - "score" MUST equal the exact sum of the 5 dimension scores
-- "notes" must be specific to THIS CV (name the section, bullet, or claim that needs fixing)
+- "notes" must be specific to THIS CV — if irrelevant experiences appear, name them and say to remove them
 - "passed" is true only if score >= 7.5

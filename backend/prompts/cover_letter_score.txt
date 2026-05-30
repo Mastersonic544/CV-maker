@@ -24,6 +24,3 @@ You are the {hr_name_or_title} at {company_name}. You are reviewing a candidate'
 }
 
 Return ONLY valid JSON. No markdown fences, no explanations.
-
-## Cover Letter Under Review
-{doc_json}

@@ -1,667 +1,693 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { apiClient, BASE_URL } from '../api/client';
+import { apiClient } from '../api/client';
 import {
-  Send, AlertTriangle, CheckCircle2, XCircle, Loader2,
-  StopCircle, ExternalLink, FileText, RefreshCw, Shield,
-  Star, Brain, Sparkles, X, BookOpen, Monitor, Clock
+  Send, CheckCircle2, Loader2, XCircle,
+  ExternalLink, RefreshCw,
+  Mail, Edit2, Check, X, Eye, EyeOff, Info,
+  Globe, AlertTriangle, Ban, PlayCircle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import CVPreview from '../components/CVPreview';
 
-const INSIGHT_LABELS = {
-  what_they_look_for: 'What They Look For',
-  red_flag: 'Red Flag to Avoid',
-  cultural_keyword: 'Cultural Keyword',
-  communication_style: 'Communication Style',
-  tone: 'Tone Preference',
-};
+// ── Inline HR email editor with auto-fetch ───────────────────────────────────
 
-const Apply = () => {
-  const navigate = useNavigate();
-  const [status, setStatus] = useState(null);
-  const [autoTargets, setAutoTargets] = useState([]);
-  const [manualTargets, setManualTargets] = useState([]);
-  const [metaData, setMetaData] = useState({});
-  const [loading, setLoading] = useState(true);
+const HrEmailEditor = ({ companyId, initialEmail, onSaved }) => {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(initialEmail || '');
+  const [saving, setSaving] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState('');
 
-  const [isRunning, setIsRunning] = useState(false);
-  const [progressLog, setProgressLog] = useState([]);
-  const [countdown, setCountdown] = useState(null); // seconds remaining in inter-app wait
-  const esRef = useRef(null);
+  // Sync when parent updates hr_email after auto-fetch
+  useEffect(() => {
+    if (initialEmail && initialEmail !== value) setValue(initialEmail);
+  }, [initialEmail]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Insight explanation modal state
-  const [selectedInsight, setSelectedInsight] = useState(null);
-  const [explanation, setExplanation] = useState(null);
-  const [explainLoading, setExplainLoading] = useState(false);
-
-  useEffect(() => { fetchData(); }, []);
-
-  const fetchData = async () => {
+  const handleSave = async () => {
+    setSaving(true);
     try {
-      const [stats, allTargets] = await Promise.all([
-        apiClient.getApplyStatus(),
-        apiClient.getTargets(),
-      ]);
-      setStatus(stats);
-      const pending = allTargets.filter(t => t.status === 'pending');
-      const auto = pending.filter(t => t.apply_type !== 'external');
-      const manual = pending.filter(t => t.apply_type === 'external');
-      setAutoTargets(auto);
-      setManualTargets(manual);
-
-      const results = {};
-      await Promise.all(manual.map(async (t) => {
-        try {
-          const [meta, iters] = await Promise.all([
-            apiClient.getApplicationMeta(t.company_id),
-            apiClient.getGANIterations(t.company_id),
-          ]);
-          const score = iters?.length > 0 ? iters[iters.length - 1].score : null;
-          results[t.company_id] = { persona: meta?.persona, score };
-        } catch (_) {}
-      }));
-      setMetaData(results);
-    } catch (err) {
-      console.error('Failed to load apply status', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const upsertLog = (companyId, name, logStatus, extra = {}) => {
-    setProgressLog(prev => {
-      const idx = prev.findIndex(p => p.company_id === companyId);
-      const entry = { company_id: companyId, name, status: logStatus, ...extra };
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = entry;
-        return next;
-      }
-      return [entry, ...prev];
-    });
-  };
-
-  const handleStartQueue = () => {
-    if (autoTargets.length === 0 || isRunning) return;
-    setIsRunning(true);
-    setProgressLog([]);
-    setCountdown(null);
-
-    const es = new EventSource(`${BASE_URL}/apply/batch/stream`);
-    esRef.current = es;
-
-    es.onmessage = (e) => {
-      const data = e.data;
-
-      if (data.startsWith('PREPARING|')) {
-        const [, id, name] = data.split('|');
-        setCountdown(null);
-        upsertLog(id, name, 'processing');
-        return;
-      }
-
-      if (data.startsWith('DONE_ONE|')) {
-        const [, id, name, outcome] = data.split('|');
-        upsertLog(id, name, outcome === 'success' ? 'success' : 'failed');
-        return;
-      }
-
-      if (data.startsWith('ERROR_ONE|')) {
-        const [, id, name, ...rest] = data.split('|');
-        upsertLog(id, name, 'error', { error: rest.join('|') });
-        return;
-      }
-
-      if (data.startsWith('WAITING|')) {
-        const secs = parseInt(data.split('|')[1], 10);
-        setCountdown(secs);
-        return;
-      }
-
-      if (data.startsWith('TICK|')) {
-        const secs = parseInt(data.split('|')[1], 10);
-        setCountdown(secs);
-        return;
-      }
-
-      if (data.startsWith('LIMIT_REACHED|')) {
-        const max = data.split('|')[1];
-        setProgressLog(prev => [
-          { company_id: '__limit__', name: `Daily limit of ${max} reached`, status: 'limit' },
-          ...prev,
-        ]);
-        finish();
-        return;
-      }
-
-      if (data === 'BATCH_DONE') {
-        finish();
-      }
-    };
-
-    es.onerror = () => {
-      setProgressLog(prev => [
-        { company_id: '__err__', name: 'Connection lost', status: 'error', error: 'SSE connection dropped' },
-        ...prev,
-      ]);
-      finish();
-    };
-  };
-
-  const finish = () => {
-    esRef.current?.close();
-    esRef.current = null;
-    setIsRunning(false);
-    setCountdown(null);
-    fetchData();
-  };
-
-  const handleAbort = () => {
-    esRef.current?.close();
-    esRef.current = null;
-    setIsRunning(false);
-    setCountdown(null);
-    setProgressLog(prev => [
-      { company_id: '__abort__', name: 'Queue aborted by user', status: 'aborted' },
-      ...prev,
-    ]);
-    fetchData();
-  };
-
-  const handleRegenerateDoc = (company_id, doc_type) => {
-    const trigger = doc_type === 'cv'
-      ? apiClient.generateCV(company_id)
-      : apiClient.generateCoverLetter(company_id);
-
-    return trigger.then(() => new Promise((resolve, reject) => {
-      const es = new EventSource(`${BASE_URL}/generation/status/${company_id}`);
-      es.onmessage = (e) => {
-        if (e.data.startsWith('DONE|')) {
-          if (doc_type === 'cv') {
-            const score = parseFloat(e.data.split('|')[1]);
-            setMetaData(prev => ({
-              ...prev,
-              [company_id]: { ...prev[company_id], score },
-            }));
-          }
-          es.close(); resolve();
-        } else if (e.data.startsWith('ERROR|')) {
-          es.close(); reject(new Error(e.data.replace('ERROR|', '')));
-        }
-      };
-      es.onerror = () => { es.close(); reject(new Error('SSE connection failed')); };
-    }));
-  };
-
-  const handleInsightClick = async (companyId, type, value) => {
-    if (explainLoading) return;
-    setSelectedInsight({ companyId, type, value });
-    setExplanation(null);
-    setExplainLoading(true);
-    try {
-      const result = await apiClient.explainInsight(companyId, type, value);
-      setExplanation(result);
+      await apiClient.updateTargetEmail(companyId, value.trim());
+      onSaved(value.trim());
+      setEditing(false);
+      setFetchError('');
     } catch {
-      setExplanation({ error: true });
+      // ignore
     } finally {
-      setExplainLoading(false);
+      setSaving(false);
     }
   };
 
-  const closeModal = () => {
-    setSelectedInsight(null);
-    setExplanation(null);
-    setExplainLoading(false);
+  const handleFetch = async () => {
+    setFetching(true);
+    setFetchError('');
+    try {
+      const result = await apiClient.fetchHrEmail(companyId);
+      setValue(result.email);
+      onSaved(result.email);
+    } catch (err) {
+      setFetchError(err.message || 'Could not find an email.');
+    } finally {
+      setFetching(false);
+    }
   };
-
-  const logStatusStyle = (s) => {
-    if (s === 'processing') return 'bg-[#6C63FF]/10 border-[#6C63FF]/30';
-    if (s === 'success')    return 'bg-emerald-500/10 border-emerald-500/30';
-    if (s === 'failed' || s === 'error') return 'bg-red-500/10 border-red-500/30';
-    if (s === 'limit')      return 'bg-amber-500/10 border-amber-500/30';
-    return 'bg-zinc-900/50 border-zinc-800';
-  };
-
-  if (loading) return (
-    <div className="p-8 flex justify-center">
-      <Loader2 className="w-8 h-8 animate-spin text-[#6C63FF]" />
-    </div>
-  );
 
   return (
-    <div className="max-w-5xl mx-auto space-y-10 pb-12">
-      <div>
-        <h1 className="text-3xl font-bold text-white tracking-tight">Apply</h1>
-        <p className="text-zinc-500 text-sm mt-1">Submit your prepared applications.</p>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-zinc-400 mb-1">Auto Queue</h3>
-          <p className="text-3xl font-bold text-white">{autoTargets.length}</p>
-          <p className="text-xs text-zinc-600 mt-1">LinkedIn Easy Apply + Email</p>
+    <div className="space-y-1">
+      {!editing ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Mail className="w-3.5 h-3.5 shrink-0" style={{ color: 'rgba(var(--cv-text-rgb), 0.4)' }} />
+          {value ? (
+            <span className="font-dm" style={{ fontSize: '0.72rem', color: 'rgba(var(--cv-text-rgb), 0.7)' }}>{value}</span>
+          ) : (
+            <span className="font-dm" style={{ fontSize: '0.72rem', color: 'rgba(var(--cv-text-rgb), 0.35)', fontStyle: 'italic' }}>
+              No HR email
+            </span>
+          )}
+          {/* Fetch button */}
+          <button
+            onClick={handleFetch}
+            disabled={fetching || !!value}
+            className="p-0.5 transition-colors"
+            style={{
+              color: fetching ? 'var(--cv-cyan)' : value ? 'rgba(var(--cv-text-rgb), 0.18)' : 'var(--cv-cyan)',
+              cursor: value ? 'default' : 'pointer',
+            }}
+            title={value ? 'Email already set' : 'Auto-fetch from company website'}
+          >
+            {fetching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Globe className="w-3 h-3" />}
+          </button>
+          {/* Edit button */}
+          <button
+            onClick={() => setEditing(true)}
+            className="p-0.5 transition-colors"
+            style={{ color: 'rgba(var(--cv-text-rgb), 0.35)' }}
+            title="Edit HR email manually"
+          >
+            <Edit2 className="w-3 h-3" />
+          </button>
         </div>
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-zinc-400 mb-1">Sent Today</h3>
-          <p className="text-3xl font-bold text-emerald-400">
-            {status?.sent_today} <span className="text-sm text-zinc-500">/ {status?.max_limit}</span>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Mail className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--cv-cyan)' }} />
+          <input
+            type="email"
+            autoFocus
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            placeholder="hr@company.com"
+            className="cv-input"
+            style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem', flex: 1, minWidth: 0 }}
+          />
+          <button onClick={handleSave} disabled={saving} className="p-1" style={{ color: '#34d399' }} title="Save">
+            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+          </button>
+          <button onClick={() => { setEditing(false); setValue(initialEmail || ''); }} className="p-1" style={{ color: '#f87171' }} title="Cancel">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+      {fetchError && (
+        <p className="font-dm" style={{ fontSize: '0.62rem', color: '#f87171', paddingLeft: '1.25rem' }}>{fetchError}</p>
+      )}
+    </div>
+  );
+};
+
+// ── Email preview card ───────────────────────────────────────────────────────
+
+const EmailCard = ({ target, onApplied, onSkip, batchSending, batchResult }) => {
+  const navigate = useNavigate();
+  const [preview, setPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [showBody, setShowBody] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [skipping, setSkipping] = useState(false);
+  const [hrEmail, setHrEmail] = useState(target.hr_email || '');
+  const [error, setError] = useState('');
+
+  // Email regenerate / edit state
+  const [regenerating, setRegenerating] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editSubject, setEditSubject] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const loadPreview = async () => {
+    if (preview && !editing) { setShowBody(v => !v); return; }
+    setLoadingPreview(true);
+    try {
+      const data = await apiClient.getEmailPreview(target.company_id);
+      setPreview(data);
+      setShowBody(true);
+    } catch {
+      setError('Could not load email preview.');
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    setRegenerating(true);
+    setError('');
+    try {
+      const data = await apiClient.generateEmail(target.company_id);
+      setPreview(prev => ({ ...prev, subject: data.subject, body: data.body, is_draft: true }));
+      setShowBody(true);
+      setEditing(false);
+    } catch (err) {
+      setError(err.message || 'Failed to regenerate email.');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const startEditing = () => {
+    setEditSubject(preview?.subject || '');
+    setEditBody(preview?.body || '');
+    setEditing(true);
+    setShowBody(true);
+  };
+
+  const handleSaveEdit = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await apiClient.saveEmail(target.company_id, editSubject, editBody);
+      setPreview(prev => ({ ...prev, subject: editSubject, body: editBody, is_draft: true }));
+      setEditing(false);
+    } catch (err) {
+      setError(err.message || 'Failed to save email.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!hrEmail) { setError('Add or fetch an HR email address first.'); return; }
+    setSending(true);
+    setError('');
+    try {
+      await apiClient.applyToCompany(target.company_id);
+      setSent(true);
+      onApplied(target.company_id);
+    } catch (err) {
+      setError(err.message || 'Failed to send email.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    setSkipping(true);
+    try {
+      await apiClient.skipAndBlacklist(target.company_id);
+      onSkip(target.company_id);
+    } catch {
+      setSkipping(false);
+    }
+  };
+
+  // Reflect batch result
+  const isBatchFail = batchResult === 'no_email' || batchResult === 'send_fail';
+  const isBatchSent = batchResult === 'sent';
+  const displaySent = sent || isBatchSent;
+
+  return (
+    <div
+      className="p-5 space-y-4"
+      style={{
+        background: 'var(--cv-card-bg)',
+        border: `1px solid ${isBatchFail ? 'rgba(239,68,68,0.25)' : 'var(--cv-border)'}`,
+      }}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h3 className="font-syne" style={{ fontWeight: 700, fontSize: '1rem', letterSpacing: '-0.01em', color: 'var(--cv-text)' }}>
+            {target.company_name}
+          </h3>
+          <p className="font-dm mt-0.5" style={{ fontSize: '0.68rem', color: 'rgba(var(--cv-text-rgb), 0.55)' }}>
+            {target.job_title} · {target.location}
           </p>
         </div>
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-zinc-400 mb-1">Remaining</h3>
-          <p className="text-3xl font-bold text-[#6C63FF]">{status?.remaining_today}</p>
+
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {/* Batch status badge */}
+          {batchResult === 'no_email' && (
+            <span className="font-dm flex items-center gap-1 px-2 py-1" style={{ fontSize: '0.55rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
+              <AlertTriangle className="w-3 h-3" /> No email found
+            </span>
+          )}
+          {batchResult === 'send_fail' && (
+            <span className="font-dm flex items-center gap-1 px-2 py-1" style={{ fontSize: '0.55rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
+              <XCircle className="w-3 h-3" /> Send failed
+            </span>
+          )}
+
+          {/* Skip & Blacklist */}
+          {isBatchFail && !displaySent && (
+            <button
+              onClick={handleSkip}
+              disabled={skipping}
+              className="font-dm flex items-center gap-1.5 px-3 py-1.5 transition-colors"
+              style={{ fontSize: '0.6rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.04)' }}
+              title="Remove from queue and never show this listing again"
+            >
+              {skipping ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />}
+              Skip &amp; blacklist
+            </button>
+          )}
+
+          {!displaySent && !batchSending && (
+            <button
+              onClick={loadPreview}
+              disabled={loadingPreview}
+              className="font-dm flex items-center gap-1.5 px-3 py-1.5 transition-colors"
+              style={{ fontSize: '0.6rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.65)', border: '1px solid var(--cv-border)', background: 'rgba(var(--cv-text-rgb), 0.03)' }}
+            >
+              {loadingPreview ? <Loader2 className="w-3 h-3 animate-spin" /> : showBody ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+              {showBody ? 'Hide' : 'Preview'}
+            </button>
+          )}
+
+          {displaySent ? (
+            <div className="font-dm flex items-center gap-1.5 px-3 py-1.5" style={{ fontSize: '0.6rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }}>
+              <CheckCircle2 className="w-3 h-3" /> Sent
+            </div>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={sending || !hrEmail || batchSending}
+              className="font-dm flex items-center gap-1.5 px-4 py-1.5 transition-colors"
+              style={{
+                fontSize: '0.6rem', letterSpacing: '0.16em', textTransform: 'uppercase',
+                color: sending || !hrEmail || batchSending ? 'rgba(var(--cv-text-rgb), 0.3)' : '#000',
+                background: sending || !hrEmail || batchSending ? 'rgba(245,158,11,0.1)' : '#f59e0b',
+                border: `1px solid ${sending || !hrEmail || batchSending ? 'rgba(245,158,11,0.2)' : '#f59e0b'}`,
+                cursor: !hrEmail || batchSending ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+              {sending ? 'Sending…' : 'Apply Now'}
+            </button>
+          )}
         </div>
       </div>
 
-      {status?.remaining_today < autoTargets.length && autoTargets.length > 0 && (
-        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-amber-200">
-            Your queue ({autoTargets.length}) exceeds your remaining daily limit ({status.remaining_today}).
-            The queue will stop once the limit is reached.
-          </p>
+      {/* HR email editor */}
+      <HrEmailEditor companyId={target.company_id} initialEmail={hrEmail} onSaved={setHrEmail} />
+
+      {/* Docs status */}
+      {!displaySent && (
+        <div className="flex items-center gap-3 flex-wrap font-dm" style={{ fontSize: '0.65rem', color: 'rgba(var(--cv-text-rgb), 0.45)' }}>
+          {preview ? (
+            <>
+              <span style={{ color: preview.has_cv ? '#34d399' : '#f87171' }}>
+                {preview.has_cv ? '✓ CV ready' : '✗ No CV — generate in Build CV first'}
+              </span>
+              <span style={{ color: 'rgba(var(--cv-text-rgb), 0.22)' }}>·</span>
+              <span style={{ color: preview.has_cover_letter ? '#34d399' : 'rgba(var(--cv-text-rgb), 0.45)' }}>
+                {preview.has_cover_letter ? '✓ Cover letter attached' : 'No cover letter'}
+              </span>
+            </>
+          ) : (
+            <button onClick={() => navigate('/review')} className="hover:underline" style={{ color: 'rgba(var(--cv-text-rgb), 0.45)' }}>
+              Generate CV + cover letter in Build CV first →
+            </button>
+          )}
         </div>
       )}
 
-      {/* ── Auto-apply execution panel ── */}
-      {autoTargets.length > 0 && (
-        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden p-6">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold text-white">Automated Queue</h2>
-            <div className="flex gap-3">
-              {!isRunning && (
-                <button
-                  onClick={handleStartQueue}
-                  disabled={autoTargets.length === 0 || status?.remaining_today <= 0}
-                  className="px-6 py-2 bg-[#6C63FF] hover:bg-[#5B54E6] disabled:opacity-50 disabled:cursor-not-allowed
-                             text-white rounded-lg font-bold transition flex items-center gap-2"
-                >
-                  <Send className="w-4 h-4" /> Start Apply Queue
-                </button>
+      {/* Email body preview / editor */}
+      {showBody && preview && (
+        <div className="space-y-2" style={{ background: 'rgba(var(--cv-text-rgb), 0.02)', border: '1px solid rgba(var(--cv-text-rgb), 0.07)', padding: '1rem' }}>
+          {/* Preview toolbar */}
+          {!displaySent && (
+            <div className="flex items-center justify-between gap-2 pb-2 flex-wrap" style={{ borderBottom: '1px solid rgba(var(--cv-text-rgb), 0.07)' }}>
+              <div className="flex items-center gap-2">
+                {preview.is_draft && (
+                  <span className="font-dm px-1.5 py-0.5" style={{ fontSize: '0.5rem', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--cv-cyan)', border: '1px solid rgba(var(--cv-cyan-rgb), 0.35)', background: 'rgba(var(--cv-cyan-rgb), 0.06)' }}>
+                    Custom
+                  </span>
+                )}
+              </div>
+              {!editing && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRegenerate}
+                    disabled={regenerating || batchSending}
+                    className="font-dm flex items-center gap-1 px-2 py-1 transition-colors"
+                    style={{ fontSize: '0.55rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: regenerating ? 'var(--cv-cyan)' : 'rgba(var(--cv-text-rgb), 0.55)', border: '1px solid rgba(var(--cv-text-rgb), 0.12)' }}
+                    title="Regenerate email using AI"
+                  >
+                    {regenerating ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <RefreshCw className="w-2.5 h-2.5" />}
+                    Regenerate
+                  </button>
+                  <button
+                    onClick={startEditing}
+                    disabled={batchSending}
+                    className="font-dm flex items-center gap-1 px-2 py-1 transition-colors"
+                    style={{ fontSize: '0.55rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.55)', border: '1px solid rgba(var(--cv-text-rgb), 0.12)' }}
+                    title="Edit email manually"
+                  >
+                    <Edit2 className="w-2.5 h-2.5" /> Edit
+                  </button>
+                </div>
               )}
-              {isRunning && (
-                <button
-                  onClick={handleAbort}
-                  className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-bold transition
-                             flex items-center gap-2 shadow-lg shadow-red-500/20"
-                >
-                  <StopCircle className="w-4 h-4" /> Abort
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Browser-active banner */}
-          {isRunning && (
-            <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
-              <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-              </span>
-              <Monitor className="w-4 h-4 text-emerald-400" />
-              <span className="text-sm text-emerald-300 font-medium">
-                Browser window is live — you can see and intervene at any time
-              </span>
-              {countdown !== null && (
-                <div className="ml-auto flex items-center gap-1.5 text-zinc-400 text-sm">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>Next in <span className="font-mono text-white">{countdown}s</span></span>
+              {editing && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSaveEdit}
+                    disabled={saving}
+                    className="font-dm flex items-center gap-1 px-2 py-1 transition-colors"
+                    style={{ fontSize: '0.55rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }}
+                  >
+                    {saving ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Check className="w-2.5 h-2.5" />}
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setEditing(false)}
+                    className="font-dm flex items-center gap-1 px-2 py-1 transition-colors"
+                    style={{ fontSize: '0.55rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }}
+                  >
+                    <X className="w-2.5 h-2.5" /> Cancel
+                  </button>
                 </div>
               )}
             </div>
           )}
 
-          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-            {progressLog.length === 0 && (
-              <div className="text-center py-10 text-zinc-600 font-mono text-sm border border-zinc-800 border-dashed rounded-xl">
-                Awaiting execution…
+          {editing ? (
+            <div className="space-y-3">
+              <div>
+                <label className="font-dm block mb-1" style={{ fontSize: '0.55rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.4)' }}>Subject</label>
+                <input
+                  type="text"
+                  value={editSubject}
+                  onChange={e => setEditSubject(e.target.value)}
+                  className="cv-input w-full"
+                  style={{ fontSize: '0.72rem', padding: '0.4rem 0.6rem' }}
+                />
               </div>
-            )}
-            {progressLog.map((log, idx) => (
+              <div>
+                <label className="font-dm block mb-1" style={{ fontSize: '0.55rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.4)' }}>Body</label>
+                <textarea
+                  value={editBody}
+                  onChange={e => setEditBody(e.target.value)}
+                  rows={10}
+                  className="cv-input w-full"
+                  style={{ fontSize: '0.72rem', lineHeight: 1.7, padding: '0.5rem 0.6rem', resize: 'vertical', fontFamily: 'inherit' }}
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="font-dm" style={{ fontSize: '0.55rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.4)' }}>Subject</span>
+                <span className="font-dm" style={{ fontSize: '0.72rem', color: 'var(--cv-text)' }}>{preview.subject}</span>
+              </div>
+              <pre className="font-dm whitespace-pre-wrap" style={{ fontSize: '0.72rem', lineHeight: 1.7, color: 'rgba(var(--cv-text-rgb), 0.72)', maxHeight: '220px', overflowY: 'auto' }}>
+                {preview.body}
+              </pre>
+            </>
+          )}
+        </div>
+      )}
+
+      {error && <p className="font-dm" style={{ fontSize: '0.68rem', color: '#f87171' }}>{error}</p>}
+    </div>
+  );
+};
+
+// ── Main Apply page ──────────────────────────────────────────────────────────
+
+const Apply = () => {
+  const navigate = useNavigate();
+  const [status, setStatus] = useState(null);
+  const [emailTargets, setEmailTargets] = useState([]);
+  const [externalTargets, setExternalTargets] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Batch send state
+  const [batchSending, setBatchSending] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(null); // { current, total }
+  const [batchResults, setBatchResults] = useState({});     // { company_id: 'sent' | 'no_email' | 'send_fail' }
+
+  useEffect(() => { fetchData(); }, []);
+
+  const fetchData = async () => {
+    const [statsResult, targetsResult] = await Promise.allSettled([
+      apiClient.getApplyStatus(),
+      apiClient.getTargets(),
+    ]);
+
+    if (statsResult.status === 'fulfilled') setStatus(statsResult.value);
+    else console.error('Failed to load apply status', statsResult.reason);
+
+    if (targetsResult.status === 'fulfilled') {
+      const pending = targetsResult.value.filter(t => t.status === 'pending');
+      setEmailTargets(pending.filter(t => t.apply_type === 'email'));
+      setExternalTargets(pending.filter(t => t.apply_type === 'external'));
+    } else {
+      console.error('Failed to load targets', targetsResult.reason);
+    }
+
+    setLoading(false);
+  };
+
+  const handleEmailApplied = (companyId) => {
+    setEmailTargets(prev => prev.filter(t => t.company_id !== companyId));
+    setBatchResults(prev => ({ ...prev, [companyId]: 'sent' }));
+    fetchData();
+  };
+
+  const handleSkip = (companyId) => {
+    setEmailTargets(prev => prev.filter(t => t.company_id !== companyId));
+    setBatchResults(prev => { const n = { ...prev }; delete n[companyId]; return n; });
+  };
+
+  const handleSendAll = async () => {
+    setBatchSending(true);
+    setBatchResults({});
+    const targets = [...emailTargets];
+    setBatchProgress({ current: 0, total: targets.length });
+
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+      setBatchProgress({ current: i + 1, total: targets.length });
+      let email = target.hr_email;
+
+      // Auto-fetch if no email
+      if (!email) {
+        try {
+          const result = await apiClient.fetchHrEmail(target.company_id);
+          email = result.email;
+          // Update local state so the card shows the found email
+          setEmailTargets(prev => prev.map(t =>
+            t.company_id === target.company_id ? { ...t, hr_email: email } : t
+          ));
+        } catch {
+          setBatchResults(prev => ({ ...prev, [target.company_id]: 'no_email' }));
+          continue;
+        }
+      }
+
+      try {
+        await apiClient.applyToCompany(target.company_id);
+        setBatchResults(prev => ({ ...prev, [target.company_id]: 'sent' }));
+        setEmailTargets(prev => prev.filter(t => t.company_id !== target.company_id));
+      } catch {
+        setBatchResults(prev => ({ ...prev, [target.company_id]: 'send_fail' }));
+      }
+    }
+
+    setBatchSending(false);
+    setBatchProgress(null);
+    fetchData();
+  };
+
+  const SectionLabel = ({ label }) => (
+    <div className="flex items-center gap-3 mb-4">
+      <span style={{ width: 16, height: 1, background: 'var(--cv-cyan)' }} />
+      <span className="font-dm" style={{ fontSize: '0.55rem', letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--cv-cyan)' }}>
+        {label}
+      </span>
+    </div>
+  );
+
+  const failedTargets = emailTargets.filter(t => batchResults[t.company_id] === 'no_email' || batchResults[t.company_id] === 'send_fail');
+  const totalPending = emailTargets.length + externalTargets.length;
+
+  if (loading) return (
+    <div className="flex justify-center py-16">
+      <Loader2 className="w-7 h-7 animate-spin" style={{ color: 'var(--cv-cyan)' }} />
+    </div>
+  );
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-10 pb-12 cv-reveal">
+
+      {/* Page title */}
+      <div>
+        <div className="flex items-center gap-3 mb-3">
+          <span style={{ width: 22, height: 1, background: 'var(--cv-cyan)' }} />
+          <span className="font-dm" style={{ fontSize: '0.62rem', letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--cv-cyan)' }}>
+            Phase 05 / Apply
+          </span>
+        </div>
+        <h1 className="font-syne" style={{ fontWeight: 800, fontSize: 'clamp(2rem,4vw,2.8rem)', letterSpacing: '-0.04em', color: 'var(--cv-text)', lineHeight: 1 }}>
+          Send Emails.
+        </h1>
+        <p className="font-dm mt-3" style={{ fontSize: '0.78rem', color: 'rgba(var(--cv-text-rgb), 0.55)' }}>
+          Send tailored applications. Missing emails are auto-fetched from the company website.
+        </p>
+      </div>
+
+      {/* Stats strip */}
+      <div className="grid grid-cols-3 gap-4">
+        {[
+          { label: 'Pending', value: totalPending, color: 'var(--cv-text)' },
+          { label: 'Sent Today', value: `${status?.sent_today ?? 0} / ${status?.max_limit ?? 20}`, color: '#34d399' },
+          { label: 'Remaining', value: status?.remaining_today ?? 20, color: 'var(--cv-cyan)' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="p-5" style={{ background: 'var(--cv-card-bg)', border: '1px solid var(--cv-border)' }}>
+            <p className="font-dm mb-1" style={{ fontSize: '0.55rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.45)' }}>{label}</p>
+            <p className="font-syne" style={{ fontWeight: 800, fontSize: '1.6rem', letterSpacing: '-0.03em', color }}>{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Empty state */}
+      {totalPending === 0 && Object.keys(batchResults).length === 0 && (
+        <div className="text-center py-16 font-dm" style={{ border: '1px dashed rgba(var(--cv-text-rgb), 0.12)', color: 'rgba(var(--cv-text-rgb), 0.4)', fontSize: '0.72rem' }}>
+          <Send className="w-8 h-8 mx-auto mb-3 opacity-25" />
+          <p className="mb-3">No applications in queue.</p>
+          <button onClick={() => navigate('/discover')} className="hover:underline" style={{ color: 'var(--cv-cyan)' }}>
+            Go to Find Jobs to add listings →
+          </button>
+        </div>
+      )}
+
+      {/* ── Section 1: Email applications ── */}
+      {emailTargets.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <SectionLabel label="01 / Email applications" />
+            <button
+              onClick={handleSendAll}
+              disabled={batchSending}
+              className="font-dm flex items-center gap-2 px-4 py-2 transition-colors"
+              style={{
+                fontSize: '0.6rem', letterSpacing: '0.18em', textTransform: 'uppercase',
+                color: batchSending ? 'rgba(var(--cv-text-rgb), 0.4)' : 'var(--cv-bg)',
+                background: batchSending ? 'rgba(var(--cv-cyan-rgb), 0.12)' : 'var(--cv-cyan)',
+                border: '1px solid var(--cv-cyan)',
+              }}
+            >
+              {batchSending
+                ? <><Loader2 className="w-3 h-3 animate-spin" /> Sending {batchProgress?.current}/{batchProgress?.total}</>
+                : <><PlayCircle className="w-3 h-3" /> Send All</>}
+            </button>
+          </div>
+
+          {/* Missing email banner */}
+          {failedTargets.length > 0 && (
+            <div
+              className="flex items-start gap-3 p-4 mb-5 font-dm"
+              style={{ fontSize: '0.68rem', background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', color: 'rgba(239,68,68,0.85)', lineHeight: 1.6 }}
+            >
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>
+                <strong>{failedTargets.length}</strong> {failedTargets.length === 1 ? 'company' : 'companies'} had no contact email found and were skipped.
+                Use <strong>Skip &amp; Blacklist</strong> on each card below to remove them permanently, or add the email manually and retry.
+              </span>
+            </div>
+          )}
+
+          {/* Email notice */}
+          <div
+            className="flex items-start gap-3 p-4 mb-5 font-dm"
+            style={{ fontSize: '0.68rem', background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.2)', color: 'rgba(245,158,11,0.85)', lineHeight: 1.6 }}
+          >
+            <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <div>
+                Emails are sent via <strong>Gmail SMTP</strong>. Free: up to <strong>500/day</strong>.
+                {' '}Set credentials in{' '}
+                <button onClick={() => navigate('/setup-apis')} className="underline">API Setup</button>.
+              </div>
+              <div>
+                The <Globe className="w-3 h-3 inline mx-0.5" /> icon auto-fetches missing HR emails from the company website.
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {emailTargets.map(target => (
+              <EmailCard
+                key={target.company_id}
+                target={target}
+                onApplied={handleEmailApplied}
+                onSkip={handleSkip}
+                batchSending={batchSending}
+                batchResult={batchResults[target.company_id]}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Section 2: External / manual apply ── */}
+      {externalTargets.length > 0 && (
+        <div>
+          <SectionLabel label="02 / Manual apply — open externally" />
+          <div className="space-y-3">
+            {externalTargets.map(target => (
               <div
-                key={idx}
-                className={`p-4 rounded-xl border flex items-center justify-between ${logStatusStyle(log.status)}`}
+                key={target.company_id}
+                className="flex items-center justify-between p-4 gap-3 flex-wrap"
+                style={{ background: 'var(--cv-card-bg)', border: '1px solid var(--cv-border)' }}
               >
-                <div className="flex items-center gap-3">
-                  {log.status === 'processing' && <Loader2 className="w-5 h-5 text-[#6C63FF] animate-spin" />}
-                  {log.status === 'success'    && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
-                  {(log.status === 'error' || log.status === 'failed') && <XCircle className="w-5 h-5 text-red-400" />}
-                  {log.status === 'aborted'    && <StopCircle className="w-5 h-5 text-zinc-400" />}
-                  {log.status === 'limit'      && <AlertTriangle className="w-5 h-5 text-amber-400" />}
-                  <div>
-                    <h4 className="text-white font-medium">{log.name}</h4>
-                    {log.error && <p className="text-xs text-red-400 mt-1">{log.error}</p>}
-                  </div>
+                <div className="min-w-0">
+                  <p className="font-syne" style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--cv-text)' }}>{target.company_name}</p>
+                  <p className="font-dm mt-0.5" style={{ fontSize: '0.65rem', color: 'rgba(var(--cv-text-rgb), 0.5)' }}>
+                    {target.job_title} · {target.location}
+                  </p>
                 </div>
-                <span className="text-xs font-mono uppercase tracking-widest text-zinc-500">{log.status}</span>
+                <a
+                  href={target.job_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-dm flex items-center gap-1.5 px-4 py-2 transition-colors shrink-0"
+                  style={{ fontSize: '0.6rem', letterSpacing: '0.18em', textTransform: 'uppercase', color: '#000', background: '#f59e0b', border: '1px solid #f59e0b' }}
+                >
+                  Apply Now <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* ── Manual applications ── */}
-      {manualTargets.length > 0 && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                <FileText className="w-5 h-5 text-amber-400" />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-white">Manual Applications</h2>
-                <p className="text-sm text-zinc-500">
-                  Apply on the company site — your tailored documents and persona context are below.
-                </p>
-              </div>
-            </div>
-            <span className="text-xs font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded">
-              {manualTargets.length} pending
-            </span>
-          </div>
-
-          {manualTargets.map(target => {
-            const data = metaData[target.company_id] || {};
-            const persona = data.persona;
-            const score = data.score;
-            const hasDocs = score != null;
-
-            const Chip = ({ type, value, colorClass }) => (
-              <button
-                onClick={() => handleInsightClick(target.company_id, type, value)}
-                title="Click to understand why"
-                className={`text-[11px] px-2 py-0.5 rounded-full border transition-all cursor-pointer
-                            hover:scale-105 active:scale-95 ${colorClass}`}
-              >
-                {value}
-              </button>
-            );
-
-            return (
-              <div key={target.company_id} className="bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden">
-
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900/40">
-                  <div>
-                    <h3 className="text-lg font-bold text-white">{target.company_name}</h3>
-                    <p className="text-sm text-zinc-400">{target.job_title} · {target.location}</p>
-                  </div>
-                  <a
-                    href={target.job_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600
-                               text-black font-bold rounded-xl text-sm transition-colors shadow-lg shadow-amber-500/20"
-                  >
-                    Apply Now <ExternalLink className="w-4 h-4" />
-                  </a>
-                </div>
-
-                {/* Body: Persona left | Documents right */}
-                <div className="flex flex-col lg:flex-row">
-
-                  {/* Left: Persona context */}
-                  <div className="flex-1 p-5 border-b lg:border-b-0 lg:border-r border-zinc-800 space-y-4">
-                    <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-semibold">
-                      HR Context
-                      {persona && (
-                        <span className="ml-2 normal-case font-normal text-zinc-700">— click any chip to see why</span>
-                      )}
-                    </p>
-
-                    {persona ? (
-                      <>
-                        {persona.what_they_look_for?.length > 0 && (
-                          <div>
-                            <p className="text-xs text-zinc-500 mb-2 flex items-center gap-1">
-                              <Star className="w-3 h-3" /> What they look for
-                            </p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {persona.what_they_look_for.map((v, i) => (
-                                <Chip key={i} type="what_they_look_for" value={v}
-                                  colorClass="bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/25 hover:border-emerald-500/50" />
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {persona.red_flags_to_avoid?.length > 0 && (
-                          <div>
-                            <p className="text-xs text-zinc-500 mb-2 flex items-center gap-1">
-                              <Shield className="w-3 h-3" /> Red flags to avoid
-                            </p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {persona.red_flags_to_avoid.map((v, i) => (
-                                <Chip key={i} type="red_flag" value={v}
-                                  colorClass="bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/25 hover:border-red-500/50" />
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {persona.cultural_keywords?.length > 0 && (
-                          <div>
-                            <p className="text-xs text-zinc-500 mb-2">Keywords to mirror</p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {persona.cultural_keywords.map((k, i) => (
-                                <Chip key={i} type="cultural_keyword" value={k}
-                                  colorClass="bg-amber-500/10 border-amber-500/20 text-amber-400 hover:bg-amber-500/25 hover:border-amber-500/50" />
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="flex flex-wrap items-center gap-2 pt-1">
-                          {persona.tone_preference && (
-                            <>
-                              <span className="text-xs text-zinc-500">Tone:</span>
-                              <Chip type="tone" value={persona.tone_preference}
-                                colorClass="bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:border-zinc-600 capitalize" />
-                            </>
-                          )}
-                          {persona.hr_communication_style && (
-                            <button
-                              onClick={() => handleInsightClick(target.company_id, 'communication_style', persona.hr_communication_style)}
-                              title="Click to understand why"
-                              className="text-xs text-zinc-500 italic hover:text-zinc-300 transition-colors"
-                            >
-                              — {persona.hr_communication_style}
-                            </button>
-                          )}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="py-8 flex flex-col items-center gap-3 border border-dashed border-zinc-800 rounded-xl text-zinc-600">
-                        <Brain className="w-6 h-6 opacity-40" />
-                        <p className="text-xs text-center leading-relaxed">
-                          No persona built yet.<br />Generate documents in Review first.
-                        </p>
-                        <button
-                          onClick={() => navigate('/review')}
-                          className="text-xs text-[#6C63FF] hover:underline"
-                        >
-                          Go to Review →
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Right: Document previews */}
-                  <div className="lg:w-[520px] p-5 bg-zinc-900/20">
-                    <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-semibold mb-4">
-                      Your Documents
-                    </p>
-
-                    {hasDocs ? (
-                      <div className="flex gap-4">
-                        <div className="flex-1 flex flex-col">
-                          <span className="text-[10px] text-zinc-500 font-bold uppercase mb-2">Resume</span>
-                          <CVPreview
-                            companyId={target.company_id}
-                            score={score}
-                            docType="cv"
-                            onRegenerate={() => handleRegenerateDoc(target.company_id, 'cv')}
-                          />
-                        </div>
-                        <div className="flex-1 flex flex-col">
-                          <span className="text-[10px] text-zinc-500 font-bold uppercase mb-2">Cover Letter</span>
-                          <CVPreview
-                            companyId={target.company_id}
-                            docType="cover_letter"
-                            onRegenerate={() => handleRegenerateDoc(target.company_id, 'cover_letter')}
-                          />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center gap-3 min-h-[260px]
-                                      border-2 border-dashed border-zinc-800 rounded-xl text-zinc-600">
-                        <FileText className="w-8 h-8 opacity-40" />
-                        <p className="text-xs uppercase font-mono tracking-widest opacity-60">No Documents Yet</p>
-                        <button
-                          onClick={() => navigate('/review')}
-                          className="px-4 py-2 bg-[#6C63FF]/10 border border-[#6C63FF]/30 text-[#6C63FF]
-                                     rounded-lg text-sm font-medium hover:bg-[#6C63FF]/20 transition-colors"
-                        >
-                          Generate in Review →
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Empty state */}
-      {autoTargets.length === 0 && manualTargets.length === 0 && (
-        <div className="text-center py-16 text-zinc-600 border-2 border-dashed border-zinc-800 rounded-2xl">
-          <Send className="w-10 h-10 mx-auto mb-3 opacity-30" />
-          <p className="text-sm font-mono uppercase tracking-widest opacity-50">No targets in queue</p>
-          <button
-            onClick={() => navigate('/discover')}
-            className="mt-4 text-sm text-[#6C63FF] hover:underline"
-          >
-            Go to Discovery to add jobs →
-          </button>
-        </div>
-      )}
-
-      {!isRunning && progressLog.length > 0 && (
+      {/* Refresh control */}
+      {!batchSending && (
         <div className="flex justify-end gap-3">
           <button
             onClick={fetchData}
-            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl font-medium transition flex items-center gap-2"
+            className="font-dm flex items-center gap-2 px-4 py-2 transition-colors"
+            style={{ fontSize: '0.62rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.65)', border: '1px solid var(--cv-border)' }}
           >
-            <RefreshCw className="w-4 h-4" /> Refresh
+            <RefreshCw className="w-3.5 h-3.5" /> Refresh
           </button>
-          <button
-            onClick={() => navigate('/')}
-            className="px-6 py-3 bg-white hover:bg-zinc-200 text-black rounded-xl font-bold transition"
-          >
-            Return to Dashboard
-          </button>
-        </div>
-      )}
-
-      {/* ── Insight Explanation Modal ── */}
-      {selectedInsight && (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          onClick={closeModal}
-        >
-          <div
-            className="bg-zinc-950 border border-zinc-700 rounded-2xl w-full max-w-lg shadow-2xl shadow-black/60"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between px-5 py-4 border-b border-zinc-800">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-[#6C63FF]/10 border border-[#6C63FF]/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Sparkles className="w-4 h-4 text-[#6C63FF]" />
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-zinc-500">
-                    {INSIGHT_LABELS[selectedInsight.type] || selectedInsight.type}
-                  </p>
-                  <p className="font-bold text-white text-sm mt-0.5 leading-snug">
-                    {selectedInsight.value}
-                  </p>
-                </div>
-              </div>
-              <button onClick={closeModal} className="text-zinc-600 hover:text-white transition-colors ml-4 flex-shrink-0 p-1">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
-              {explainLoading && (
-                <div className="flex items-center gap-3 py-4">
-                  <Loader2 className="w-5 h-5 animate-spin text-[#6C63FF]" />
-                  <span className="text-sm text-zinc-400">Analyzing source data…</span>
-                </div>
-              )}
-
-              {explanation && !explanation.error && (
-                <>
-                  {explanation.term_definition && (
-                    <div className="flex gap-3 p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl">
-                      <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-widest text-amber-500/70 font-semibold mb-1">
-                          What this term means
-                        </p>
-                        <p className="text-sm text-zinc-300 leading-relaxed">{explanation.term_definition}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {explanation.source_quote && (
-                    <div className="bg-zinc-900 border-l-2 border-[#6C63FF] pl-3 py-2.5 rounded-r-lg">
-                      <p className="text-[10px] uppercase tracking-widest text-zinc-600 mb-1.5">From the job posting</p>
-                      <p className="text-xs text-zinc-400 italic leading-relaxed">"{explanation.source_quote}"</p>
-                    </div>
-                  )}
-
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-semibold mb-2">
-                      Why the AI flagged this
-                    </p>
-                    <p className="text-sm text-zinc-300 leading-relaxed">{explanation.why_identified}</p>
-                  </div>
-
-                  <div className="p-3 bg-[#6C63FF]/5 border border-[#6C63FF]/20 rounded-xl">
-                    <p className="text-[10px] uppercase tracking-widest text-[#6C63FF]/70 font-semibold mb-1.5">
-                      What to do about it
-                    </p>
-                    <p className="text-sm text-zinc-300 leading-relaxed">{explanation.what_it_means}</p>
-                  </div>
-
-                  {explanation.priority && (
-                    <div className="flex items-center gap-2 pt-1 border-t border-zinc-800/60">
-                      <span className="text-[10px] text-zinc-600">Priority:</span>
-                      <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${
-                        explanation.priority === 'high'
-                          ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                          : explanation.priority === 'medium'
-                          ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                          : 'bg-zinc-800 text-zinc-400 border-zinc-700'
-                      }`}>
-                        {explanation.priority}
-                      </span>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {explanation?.error && (
-                <p className="text-sm text-red-400">Could not load explanation. Try again.</p>
-              )}
-            </div>
-          </div>
+          {totalPending === 0 && (
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="font-dm flex items-center gap-2 px-4 py-2 transition-colors cv-btn-prim"
+              style={{ fontSize: '0.62rem', letterSpacing: '0.16em', textTransform: 'uppercase' }}
+            >
+              Dashboard
+            </button>
+          )}
         </div>
       )}
     </div>

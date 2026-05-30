@@ -1,17 +1,35 @@
-# Git ignore patterns
+# ── Python ──
 __pycache__/
-.env
-data/applications/*
-!data/applications/.gitkeep
-logs/*.log
-node_modules/
-dist/
 .venv/
-*.pdf
-*.log
 .pytest_cache/
 MagicMock/
 test_output*.txt
+
+# ── Node / frontend ──
+node_modules/
+dist/
+
+# ── Secrets & env ──
+.env
+*.enc
 data/master.key
-data/.active_user
-data/users/
+
+# ── Local editor / Claude Code config ──
+.claude/
+
+# ── Generated artifacts ──
+*.pdf
+*.log
+
+# ── User data (sensitive — never commit) ──
+# The entire data directory holds per-user profiles, applications,
+# interview sessions, encrypted keys, etc. Only the placeholder is tracked.
+data/*
+!data/.gitkeep
+
+# ── Internal / planning docs (kept local, not published) ──
+CLAUDE.md
+prd.md
+skills/
+logs/*
+!logs/.gitkeep

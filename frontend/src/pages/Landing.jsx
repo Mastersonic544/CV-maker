@@ -321,7 +321,7 @@ const LANDING_CSS = `
   @keyframes fadeIn  { to { opacity:1; } }
 `;
 
-const MQ_ITEMS = ['GAN Scoring Loop', 'Playwright Automation', 'LinkedIn Easy Apply', 'Persona-Driven CVs', 'Brevo SMTP', 'Interview Simulator', 'ATS Optimization', 'HR Persona Research'];
+const MQ_ITEMS = ['GAN Scoring Loop', 'Playwright Automation', 'LinkedIn Easy Apply', 'Persona-Driven CVs', 'Gmail SMTP', 'Interview Simulator', 'ATS Optimization', 'HR Persona Research'];
 const SKILLS = ['TypeScript', 'Rust', 'Go', 'React', 'K8s', 'Postgres', 'AWS'];
 const STATS = [
   { n: '9', em: '.4', d: 'Avg CV Score (GAN)' },
@@ -332,7 +332,7 @@ const STATS = [
 const FEATURES = [
   { idx: '01', title: 'GAN-Style CV Loop', body: 'A Generator and Discriminator LLM fight over your resume until the HR critic awards 9+/10. Every bullet quantified, every tone calibrated to the exact persona of your target company.', pill: 'meta-llama / llama-3.3-70b' },
   { idx: '02', title: 'Hiring Persona Synthesis', body: 'Scrapes CEO LinkedIn posts, HR activity, and company mission statements. The AI synthesizes a detailed personality map — tone, values, red flags — and uses it to shape every word of your application.', pill: 'Playwright + OpenRouter' },
-  { idx: '03', title: 'Headless Auto-Apply', body: 'Playwright-powered LinkedIn Easy Apply with human-like timing, scroll simulation, and multi-step form handling. Brevo SMTP for email applications with PDF attachments and LinkedIn DMs for direct HR outreach.', pill: 'Rate-limited — 20 apps/day' },
+  { idx: '03', title: 'Headless Auto-Apply', body: 'Playwright-powered LinkedIn Easy Apply with human-like timing, scroll simulation, and multi-step form handling. Gmail SMTP for email applications with PDF attachments and LinkedIn DMs for direct HR outreach.', pill: 'Rate-limited — 20 apps/day' },
   { idx: '04', title: 'Interview Simulator', body: 'Before the real thing, the AI role-plays as your target company\'s HR persona in a live chat. Hit "Help Me" for real-time coaching — hidden intent decoded, ideal structure provided — without breaking immersion.', pill: 'Persona-Injected LLM' },
 ];
 
@@ -544,7 +544,7 @@ const Landing = () => {
           {[
             { n: '01', title: 'Discover & Research', body: 'Feed your profile once. AI suggests roles, scrapes LinkedIn for live listings, then deep-dives each company — CEO posts, HR signals, cultural values — to synthesize a hiring persona for every target.', tag: 'OpenRouter · Playwright' },
             { n: '02', title: 'Generate & Score', body: 'Two LLM instances go to war. One generates your CV, the other scores it as a ruthless HR critic. The loop runs until you hit 9+/10. A completely different, optimized document per company — never reused.', tag: 'GAN Loop · Llama 3.3 70B' },
-            { n: '03', title: 'Apply & Practice', body: 'The queue sends via LinkedIn Easy Apply, Brevo SMTP, and LinkedIn DMs with human-like timing. The interview simulator then role-plays as your exact HR contact so you arrive knowing the answers.', tag: 'Rate-Limited · 20/day' },
+            { n: '03', title: 'Apply & Practice', body: 'The queue sends via LinkedIn Easy Apply, Gmail SMTP, and LinkedIn DMs with human-like timing. The interview simulator then role-plays as your exact HR contact so you arrive knowing the answers.', tag: 'Rate-Limited · 20/day' },
           ].map(({ n, title, body, tag }) => (
             <div key={n} className="p-card">
               <div className="p-num">{n}</div>

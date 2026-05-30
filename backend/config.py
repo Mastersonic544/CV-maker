@@ -10,16 +10,17 @@ class Settings(BaseSettings):
     # API Keys
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     APIFY_TOKEN: str = os.getenv("APIFY_TOKEN", "")
-    BREVO_SMTP_USER: str = os.getenv("BREVO_SMTP_USER", "")
-    BREVO_SMTP_PASSWORD: str = os.getenv("BREVO_SMTP_PASSWORD", "")
+    SMTP_USER: str = os.getenv("SMTP_USER", "")
+    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     LINKEDIN_EMAIL: str = os.getenv("LINKEDIN_EMAIL", "")
     LINKEDIN_PASSWORD: str = os.getenv("LINKEDIN_PASSWORD", "")
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
-    OPENROUTER_MODEL: str = "meta-llama/llama-3.3-70b-instruct"
+    OPENROUTER_MODEL: str = "openrouter/auto"
     # Token budget per LLM call purpose
     LLM_MAX_TOKENS_SCORING: int = 512
-    LLM_MAX_TOKENS_ROLES: int = 1024
-    LLM_MAX_TOKENS_GENERATION: int = 3000
+    LLM_MAX_TOKENS_ROLES: int = 2048
+    LLM_MAX_TOKENS_GENERATION: int = 4000
+    LLM_MAX_TOKENS_CL: int = 2000
     # Retry settings for OpenRouter calls
     LLM_MAX_RETRIES: int = 3
     LLM_RETRY_BASE_DELAY: float = 2.0
@@ -51,6 +52,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 # Instantiate settings
 settings = Settings()

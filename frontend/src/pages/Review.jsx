@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { apiClient, BASE_URL } from '../api/client';
 import CVPreview from '../components/CVPreview';
 import {
-  Target, Zap, PlayCircle, Loader2, CheckCircle2, ChevronRight,
+  Target, Zap, PlayCircle, Loader2, CheckCircle2, ExternalLink,
   FileText, ChevronDown, ChevronUp, User, Building2, Star,
   AlertCircle, Brain, BarChart2, Shield, Sparkles, X, BookOpen, RefreshCw
 } from 'lucide-react';
@@ -398,7 +398,8 @@ const Review = () => {
   const [activeGeneration, setActiveGeneration] = useState(null);
   const [progressMessages, setProgressMessages] = useState({});
   const [completed, setCompleted] = useState({});
-  const [clGenerating, setClGenerating] = useState(new Set());
+  const [generatingAll, setGeneratingAll] = useState(false);
+  const [generateAllProgress, setGenerateAllProgress] = useState(null); // { current, total, name }
 
   useEffect(() => { fetchTargets(); }, []);
 
@@ -434,58 +435,55 @@ const Review = () => {
     }
   };
 
+  const _makeSSEWaiter = (company_id) => (label) => new Promise((resolve, reject) => {
+    const es = new EventSource(`${BASE_URL}/generation/status/${company_id}`);
+    es.onmessage = (e) => {
+      if (e.data.startsWith('DONE|')) {
+        es.close(); resolve(e.data);
+      } else if (e.data.startsWith('ERROR|')) {
+        es.close(); reject(new Error(e.data.replace('ERROR|', '')));
+      } else {
+        setProgressMessages(prev => ({ ...prev, [company_id]: `${label} ${e.data}` }));
+      }
+    };
+    es.onerror = () => { es.close(); reject(new Error(`${label} connection lost`)); };
+  });
+
   const handleGenerate = async (company_id) => {
     setActiveGeneration(company_id);
     setCompleted(prev => { const n = { ...prev }; delete n[company_id]; return n; });
-
-    let cvScore = 0;
+    const waitForSSE = _makeSSEWaiter(company_id);
     try {
-      // 1. Generate CV
       setProgressMessages(prev => ({ ...prev, [company_id]: 'Starting CV engine…' }));
       await apiClient.generateCV(company_id);
-
-      cvScore = await new Promise((resolve, reject) => {
-        const es = new EventSource(`${BASE_URL}/generation/status/${company_id}`);
-        es.onmessage = (e) => {
-          if (e.data.startsWith('DONE|')) {
-            es.close(); resolve(parseFloat(e.data.split('|')[1]));
-          } else if (e.data.startsWith('ERROR|')) {
-            es.close(); reject(new Error(e.data));
-          } else {
-            setProgressMessages(prev => ({ ...prev, [company_id]: `(CV) ${e.data}` }));
-          }
-        };
-        es.onerror = () => { es.close(); reject(new Error("(CV) SSE failed")); };
-      });
-
+      const cvDone = await waitForSSE('[CV]');
+      const cvScore = parseFloat(cvDone.split('|')[1]) || 0;
       setCompleted(prev => ({ ...prev, [company_id]: { score: cvScore } }));
 
-      // 2. Generate Cover Letter
       setProgressMessages(prev => ({ ...prev, [company_id]: 'Starting Cover Letter engine…' }));
       await apiClient.generateCoverLetter(company_id);
+      await waitForSSE('[CL]');
+      setCompleted(prev => ({ ...prev, [company_id]: { ...prev[company_id], clReady: Date.now() } }));
 
-      await new Promise((resolve, reject) => {
-        const es = new EventSource(`${BASE_URL}/generation/status/${company_id}`);
-        es.onmessage = (e) => {
-          if (e.data.startsWith('DONE|')) {
-            es.close(); resolve();
-          } else if (e.data.startsWith('ERROR|')) {
-            es.close(); reject(new Error(e.data.replace('ERROR|', '')));
-          } else {
-            setProgressMessages(prev => ({ ...prev, [company_id]: `(CL) ${e.data}` }));
-          }
-        };
-        es.onerror = () => { es.close(); reject(new Error("(CL) SSE connection failed")); };
-      });
-
-      // CL is now ready — set clReady to force CVPreview to remount with fresh iframe
-      setCompleted(prev => ({
-        ...prev,
-        [company_id]: { ...prev[company_id], clReady: Date.now() },
-      }));
       setProgressMessages(prev => ({ ...prev, [company_id]: 'Complete' }));
       setActiveGeneration(null);
+    } catch (err) {
+      const msg = String(err.message || err).replace('ERROR|', '');
+      setProgressMessages(prev => ({ ...prev, [company_id]: `ERROR|${msg}` }));
+      setActiveGeneration(null);
+    }
+  };
 
+  const handleGenerateCL = async (company_id) => {
+    setActiveGeneration(company_id);
+    const waitForSSE = _makeSSEWaiter(company_id);
+    try {
+      setProgressMessages(prev => ({ ...prev, [company_id]: 'Starting Cover Letter engine…' }));
+      await apiClient.generateCoverLetter(company_id);
+      await waitForSSE('[CL]');
+      setCompleted(prev => ({ ...prev, [company_id]: { ...prev[company_id], clReady: Date.now() } }));
+      setProgressMessages(prev => ({ ...prev, [company_id]: 'Complete' }));
+      setActiveGeneration(null);
     } catch (err) {
       const msg = String(err.message || err).replace('ERROR|', '');
       setProgressMessages(prev => ({ ...prev, [company_id]: `ERROR|${msg}` }));
@@ -506,7 +504,6 @@ const Review = () => {
             const score = parseFloat(e.data.split('|')[1]);
             setCompleted(prev => ({ ...prev, [company_id]: { ...prev[company_id], score } }));
           } else {
-            // Update clReady so the CL CVPreview remounts with fresh iframe
             setCompleted(prev => ({
               ...prev,
               [company_id]: { ...prev[company_id], clReady: Date.now() },
@@ -521,6 +518,25 @@ const Review = () => {
     }));
   };
 
+  const handleGenerateAll = async () => {
+    const noDoc = targets.filter(t => !completed[t.company_id]);
+    const noCL  = targets.filter(t => completed[t.company_id] && !completed[t.company_id]?.clReady);
+    const pending = [...noDoc, ...noCL];
+    if (!pending.length) return;
+    setGeneratingAll(true);
+    for (let i = 0; i < pending.length; i++) {
+      const t = pending[i];
+      setGenerateAllProgress({ current: i + 1, total: pending.length, name: t.company_name });
+      if (completed[t.company_id]) {
+        await handleGenerateCL(t.company_id).catch(() => {});
+      } else {
+        await handleGenerate(t.company_id).catch(() => {});
+      }
+    }
+    setGeneratingAll(false);
+    setGenerateAllProgress(null);
+  };
+
   if (loading) return (
     <div className="p-8">
       <Loader2 className="w-8 h-8 animate-spin text-[#6C63FF]" />
@@ -528,10 +544,20 @@ const Review = () => {
   );
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto pb-12">
+    <div className="space-y-8 max-w-5xl mx-auto pb-12 cv-reveal">
       <div>
-        <h1 className="text-3xl font-bold text-white tracking-tight">Review & Generate</h1>
-        <p className="text-zinc-500 text-sm mt-1">Research targets and generate hyper-tailored CVs.</p>
+        <div className="flex items-center gap-3 mb-3">
+          <span style={{ width: 22, height: 1, background: 'var(--cv-cyan)' }} />
+          <span className="font-dm" style={{ fontSize: '0.62rem', letterSpacing: '0.24em', textTransform: 'uppercase', color: 'var(--cv-cyan)' }}>
+            Phase 03 / Build CV
+          </span>
+        </div>
+        <h1 className="font-syne" style={{ fontWeight: 800, fontSize: 'clamp(2rem, 4vw, 2.8rem)', letterSpacing: '-0.04em', color: 'var(--cv-text)', lineHeight: 1 }}>
+          CV Builder.
+        </h1>
+        <p className="font-dm mt-3" style={{ fontSize: '0.78rem', color: 'rgba(var(--cv-text-rgb), 0.55)' }}>
+          Research each target and generate hyper-tailored CVs and cover letters.
+        </p>
       </div>
 
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
@@ -543,14 +569,54 @@ const Review = () => {
             <h2 className="text-lg font-semibold text-white">Target Queue ({targets.length})</h2>
           </div>
           <button
-            onClick={() => targets.forEach(t => { if (!completed[t.company_id]) handleGenerate(t.company_id); })}
-            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg text-sm font-medium
-                       transition-colors flex items-center gap-2 border border-zinc-700"
+            onClick={handleGenerateAll}
+            disabled={generatingAll || !!activeGeneration || targets.every(t => completed[t.company_id]?.clReady)}
+            className="cv-btn-prim flex items-center gap-2"
+            style={{ padding: '0.6rem 1.2rem', fontSize: '0.7rem' }}
           >
-            <PlayCircle className="w-4 h-4 text-emerald-400" />
-            Generate All
+            {generatingAll
+              ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  {generateAllProgress
+                    ? `${generateAllProgress.current} / ${generateAllProgress.total}`
+                    : 'Starting…'}
+                </>
+              : <><PlayCircle className="w-3.5 h-3.5" /> Generate All</>}
           </button>
         </div>
+
+        {/* Generate All progress banner */}
+        {generatingAll && generateAllProgress && (
+          <div
+            className="mb-4 px-4 py-3 flex items-center gap-3 font-dm"
+            style={{
+              background: 'rgba(var(--cv-cyan-rgb), 0.04)',
+              border: '1px solid rgba(var(--cv-cyan-rgb), 0.2)',
+            }}
+          >
+            <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" style={{ color: 'var(--cv-cyan)' }} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <span style={{ fontSize: '0.65rem', color: 'var(--cv-cyan)', letterSpacing: '0.04em' }}>
+                  {generateAllProgress.name}
+                </span>
+                <span style={{ fontSize: '0.6rem', color: 'rgba(var(--cv-text-rgb), 0.45)', letterSpacing: '0.12em' }}>
+                  {generateAllProgress.current} / {generateAllProgress.total}
+                </span>
+              </div>
+              <div style={{ height: 2, background: 'rgba(var(--cv-text-rgb), 0.08)', borderRadius: 1 }}>
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${(generateAllProgress.current / generateAllProgress.total) * 100}%`,
+                    background: 'var(--cv-cyan)',
+                    borderRadius: 1,
+                    transition: 'width 0.4s ease',
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-4">
           {targets.map(target => {
@@ -571,10 +637,22 @@ const Review = () => {
                         <h3 className="text-lg font-bold text-white">{target.company_name}</h3>
                         <p className="text-sm text-zinc-400">{target.job_title} · {target.location}</p>
                       </div>
-                      <span className="text-[10px] font-mono tracking-wider uppercase px-2 py-1
-                                       bg-zinc-800 rounded text-zinc-400 flex-shrink-0 ml-2">
-                        {target.apply_type.replace('_', ' ')}
-                      </span>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-[10px] font-mono tracking-wider uppercase px-2 py-1 bg-zinc-800 rounded text-zinc-400">
+                          {target.apply_type.replace('_', ' ')}
+                        </span>
+                        {target.job_url && (
+                          <a
+                            href={target.job_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-[10px] font-mono tracking-wider uppercase px-2 py-1 bg-zinc-800/60 rounded text-[#6C63FF] hover:bg-zinc-700 transition-colors"
+                            title="View job posting"
+                          >
+                            View <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        )}
+                      </div>
                     </div>
 
                     {/* HR / CEO quick view */}
@@ -603,15 +681,26 @@ const Review = () => {
                           <Loader2 className="w-4 h-4 animate-spin text-[#6C63FF] flex-shrink-0" />
                           <span className="animate-pulse">{msg || 'Waiting…'}</span>
                         </div>
+                      ) : isError ? (
+                        <div className="space-y-2">
+                          <div className="text-sm text-red-400 font-mono flex items-start gap-2">
+                            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                            {String(msg).replace('ERROR|', '')}
+                          </div>
+                          {isComplete && (
+                            <button
+                              onClick={() => handleGenerateCL(target.company_id)}
+                              disabled={!!activeGeneration}
+                              className="text-xs text-[#6C63FF] hover:underline disabled:opacity-40"
+                            >
+                              Retry Cover Letter →
+                            </button>
+                          )}
+                        </div>
                       ) : isComplete ? (
                         <div className="flex items-center gap-3 text-sm font-semibold text-emerald-400">
                           <CheckCircle2 className="w-5 h-5" />
                           <span>Complete — Score: {completed[target.company_id].score.toFixed(1)}/10</span>
-                        </div>
-                      ) : isError ? (
-                        <div className="text-sm text-red-400 font-mono flex items-start gap-2">
-                          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                          {String(msg).replace('ERROR|', '')}
                         </div>
                       ) : (
                         <div className="text-sm text-zinc-600 font-mono">Awaiting generation.</div>
@@ -655,7 +744,7 @@ const Review = () => {
                               docType="cover_letter"
                               onRegenerate={() => handleRegenerateDoc(target.company_id, 'cover_letter')}
                             />
-                          ) : activeGeneration === target.company_id || clGenerating.has(target.company_id) ? (
+                          ) : activeGeneration === target.company_id ? (
                             <div className="w-full h-[300px] rounded-xl border border-dashed border-zinc-700
                                             bg-zinc-900/40 flex flex-col items-center justify-center gap-3 text-zinc-600">
                               <RefreshCw className="w-6 h-6 opacity-30 animate-spin" />
@@ -667,17 +756,9 @@ const Review = () => {
                               <FileText className="w-6 h-6 opacity-30" />
                               <p className="text-[10px] font-mono uppercase tracking-widest opacity-50">Not Generated</p>
                               <button
-                                onClick={() => {
-                                  setClGenerating(prev => new Set([...prev, target.company_id]));
-                                  handleRegenerateDoc(target.company_id, 'cover_letter')
-                                    .catch(() => {})
-                                    .finally(() => setClGenerating(prev => {
-                                      const s = new Set(prev);
-                                      s.delete(target.company_id);
-                                      return s;
-                                    }));
-                                }}
-                                className="text-xs text-[#6C63FF] hover:underline"
+                                onClick={() => handleGenerateCL(target.company_id)}
+                                disabled={!!activeGeneration}
+                                className="text-xs text-[#6C63FF] hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 Generate Cover Letter →
                               </button>
@@ -706,18 +787,6 @@ const Review = () => {
         </div>
       </div>
 
-      {targets.length > 0 && (
-        <div className="flex justify-end">
-          <button
-            onClick={() => navigate('/apply')}
-            className="px-6 py-3 bg-white text-black hover:bg-zinc-200 rounded-xl font-bold
-                       transition-all flex items-center gap-2"
-          >
-            Proceed to Apply Phase
-            <ChevronRight className="w-4 h-4 ml-1" />
-          </button>
-        </div>
-      )}
     </div>
   );
 };

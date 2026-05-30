@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import time
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
@@ -27,13 +28,23 @@ _HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
 }
 
+_MOCK_COMPANIES = [
+    ("Acme Tech",       "acme-tech"),
+    ("Nova Solutions",  "nova-solutions"),
+    ("Bright Systems",  "bright-systems"),
+    ("Crest Analytics", "crest-analytics"),
+    ("Apex Digital",    "apex-digital"),
+    ("Orbit Labs",      "orbit-labs"),
+    ("Surge Inc",       "surge-inc"),
+    ("Flux Software",   "flux-software"),
+]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _km_to_li_miles(km: int) -> int:
-    """Convert km to the nearest LinkedIn distance bucket (LinkedIn uses miles)."""
     miles = km * 0.621371
     for bucket in (10, 25, 50, 75, 100):
         if miles <= bucket:
@@ -42,7 +53,6 @@ def _km_to_li_miles(km: int) -> int:
 
 
 def _is_recent(datetime_str: str) -> bool:
-    """Return True if an ISO datetime string is within _MAX_JOB_AGE_DAYS."""
     if not datetime_str:
         return True
     try:
@@ -54,10 +64,6 @@ def _is_recent(datetime_str: str) -> bool:
 
 
 def _location_matches(scraped_loc: str, requested_loc: str) -> bool:
-    """
-    Rough check: at least one significant word in the requested location appears
-    in the scraped location. Prevents results from completely different countries.
-    """
     if not scraped_loc or not requested_loc:
         return True
     stop = {"the", "of", "and", "in", "at", "for", "a", "an", "remote"}
@@ -67,7 +73,6 @@ def _location_matches(scraped_loc: str, requested_loc: str) -> bool:
 
 
 def _total_experience_years(work_experience: list) -> int:
-    """Estimate total years of professional experience from work_experience array."""
     total = 0
     for exp in work_experience:
         start = str(exp.get("start_date") or exp.get("start_year") or exp.get("start") or "")
@@ -82,24 +87,16 @@ def _total_experience_years(work_experience: list) -> int:
 
 
 def _infer_experience_level(years: int) -> str:
-    """
-    Map total years of experience to LinkedIn f_E filter codes.
-    LinkedIn codes: 1=Internship, 2=Entry, 3=Associate, 4=Mid-Senior, 5=Director
-    """
     if years <= 1:
-        return "1,2"   # Internship + Entry
+        return "1,2"
     if years <= 3:
-        return "2,3"   # Entry + Associate
+        return "2,3"
     if years <= 7:
-        return "3,4"   # Associate + Mid-Senior
-    return "4,5"       # Mid-Senior + Director
+        return "3,4"
+    return "4,5"
 
 
 def _infer_work_type(preferences: dict) -> str:
-    """
-    Derive LinkedIn f_WT code from profile preferences.
-    LinkedIn codes: 1=On-site, 2=Remote, 3=Hybrid
-    """
     if not preferences:
         return ""
     text = " ".join(str(v) for v in preferences.values()).lower()
@@ -110,10 +107,6 @@ def _infer_work_type(preferences: dict) -> str:
 
 
 def _score_job(job: dict, role: str, skills: list) -> float:
-    """
-    Relevance score 0.0–1.0.
-    Weights: title-keyword match 60%, skills appearing in title 25%, Easy Apply bonus 15%.
-    """
     title = (job.get("title") or "").lower()
     role_tokens = [w for w in role.lower().split() if len(w) > 2]
     skill_tokens = [s.lower() for s in skills if s and len(s) > 2]
@@ -123,6 +116,32 @@ def _score_job(job: dict, role: str, skills: list) -> float:
     ea_bonus    = 0.15 if job.get("easyApply") else 0.0
 
     return round(title_score * 0.60 + skill_score * 0.25 + ea_bonus, 4)
+
+
+def _mock_targets(role: str, location: str) -> List[TargetCompany]:
+    """
+    Return placeholder TargetCompany entries when both HTTP and Playwright scraping
+    fail. URLs point to real LinkedIn searches so 'View' links are usable.
+    company_id starts with 'mock_' so the frontend can badge them.
+    """
+    role_q = urllib.parse.quote_plus(role)
+    loc_q  = urllib.parse.quote_plus(location)
+    search_url = f"https://www.linkedin.com/jobs/search/?keywords={role_q}&location={loc_q}"
+
+    results = []
+    for i, (company, slug) in enumerate(_MOCK_COMPANIES):
+        co_q = urllib.parse.quote_plus(company)
+        results.append(TargetCompany(
+            company_id=f"mock_{i}_{slug}",
+            company_name=company,
+            company_linkedin=f"https://www.linkedin.com/search/results/companies/?keywords={co_q}",
+            job_title=role,
+            job_url=search_url,
+            apply_type="external",
+            location=location,
+            status="pending",
+        ))
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -139,12 +158,12 @@ async def scrape_linkedin_jobs(
 ) -> List[TargetCompany]:
     """
     Scrape LinkedIn job listings and rank by relevance to the candidate profile.
-    Strategy: HTTP guest API (multi-page) → Playwright fallback → raise on both failing.
+    Strategy: HTTP guest API → Playwright fallback → mock data fallback.
     """
-    skills     = profile_skills or []
-    years      = _total_experience_years(work_experience or [])
-    exp_level  = _infer_experience_level(years)
-    work_type  = _infer_work_type(preferences or {})
+    skills    = profile_skills or []
+    years     = _total_experience_years(work_experience or [])
+    exp_level = _infer_experience_level(years)
+    work_type = _infer_work_type(preferences or {})
 
     logger.info(
         f"Scraping LinkedIn: '{role}' in '{location}' ({radius_km} km) | "
@@ -169,25 +188,36 @@ async def scrape_linkedin_jobs(
                          {"role": role, "location": location},
                          error=str(exc), outcome="http_failed")
 
-    # 2. Playwright fallback
+    # 2. Playwright fallback — uses sync_playwright in a thread executor to avoid
+    #    the Windows asyncio SelectorEventLoop subprocess limitation.
     if not raw:
         try:
-            raw = await _scrape_jobs_playwright(role, location, radius_km, exp_level, work_type)
+            loop = asyncio.get_event_loop()
+            raw = await loop.run_in_executor(
+                None,
+                _scrape_jobs_playwright_sync,
+                role, location, radius_km, exp_level, work_type,
+            )
             if raw:
                 logger.info(f"Playwright scrape succeeded: {len(raw)} jobs.")
                 await _log_debug("linkedin_scraper", "scrape_linkedin_jobs",
                                  {"role": role, "location": location}, outcome="success (playwright)")
         except Exception as exc:
-            logger.error(f"Playwright scrape failed ({exc})")
+            logger.warning(f"Playwright scrape failed ({exc}). Falling back to mock data.")
             await _log_debug("linkedin_scraper", "scrape_linkedin_jobs",
                              {"role": role, "location": location},
                              error=str(exc), outcome="playwright_failed")
 
+    # 3. Mock fallback — keeps the UI flow working when LinkedIn blocks requests.
+    #    Returns immediately; mock entries bypass scoring since they share one URL.
     if not raw:
-        raise RuntimeError(
-            "Could not fetch jobs from LinkedIn. LinkedIn may be rate-limiting requests. "
-            "Try again in a few minutes, or add jobs manually using the 'Add Manually' button."
-        )
+        mock = _mock_targets(role, location)
+        logger.info(f"Using mock job listings ({len(mock)} entries) for role='{role}'.")
+        await _log_debug("linkedin_scraper", "scrape_linkedin_jobs",
+                         {"role": role, "location": location}, outcome="mock fallback")
+        await _log_debug("linkedin_scraper", "scrape_linkedin_jobs",
+                         {"role": role, "location": location}, outcome="success (mocked)")
+        return mock
 
     # Score and sort by relevance before mapping
     for job in raw:
@@ -195,7 +225,7 @@ async def scrape_linkedin_jobs(
     raw.sort(key=lambda j: j["_score"], reverse=True)
 
     logger.info(
-        f"Top 3 scores: {[round(j['_score'],3) for j in raw[:3]]} | "
+        f"Top 3 scores: {[round(j['_score'], 3) for j in raw[:3]]} | "
         f"Easy Apply: {sum(1 for j in raw if j.get('easyApply'))} / {len(raw)}"
     )
 
@@ -209,7 +239,10 @@ async def scrape_linkedin_person_profile(linkedin_url: str) -> dict:
     if not linkedin_url.startswith("http"):
         linkedin_url = "https://" + linkedin_url
     try:
-        return await _scrape_person_profile_playwright(linkedin_url)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, _scrape_person_profile_sync, linkedin_url
+        )
     except Exception as exc:
         logger.warning(f"LinkedIn person profile scrape failed ({exc}).")
     return {}
@@ -220,7 +253,10 @@ async def scrape_company_profile(linkedin_url: str) -> dict:
     if not linkedin_url:
         return {}
     try:
-        return await _scrape_company_playwright(linkedin_url)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, _scrape_company_sync, linkedin_url
+        )
     except Exception as exc:
         logger.warning(f"Company profile scrape failed ({exc}).")
     return {}
@@ -231,7 +267,10 @@ async def scrape_person_posts(linkedin_url: str, max_posts: int = 20) -> List[st
     if not linkedin_url:
         return []
     try:
-        return await _scrape_posts_playwright(linkedin_url, max_posts)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, _scrape_posts_sync, linkedin_url, max_posts
+        )
     except Exception as exc:
         logger.warning(f"Person posts scrape failed ({exc}).")
     return []
@@ -248,7 +287,6 @@ async def _scrape_jobs_http(
     exp_level: str = "",
     work_type: str = "",
 ) -> List[dict]:
-    """Fetch jobs via LinkedIn's public guest API, paginating up to 3 pages."""
     import httpx
     from bs4 import BeautifulSoup
 
@@ -259,10 +297,10 @@ async def _scrape_jobs_http(
         "keywords": role,
         "location": location,
         "pageSize": "25",
-        "f_TPR":    "r604800",                       # posted in last 7 days
+        "f_TPR":    "r604800",
         "distance": str(_km_to_li_miles(radius_km)),
-        "sortBy":   "DD",                            # newest first
-        "f_JT":     "F,C",                           # Full-time + Contract
+        "sortBy":   "DD",
+        "f_JT":     "F,C",
     }
     if exp_level:
         base_params["f_E"] = exp_level
@@ -322,24 +360,25 @@ async def _scrape_jobs_http(
             logger.debug(f"HTTP page start={start}: {page_hits} new jobs (total so far: {len(jobs)})")
 
             if page_hits == 0:
-                break  # LinkedIn has no more results for this query
+                break
 
-            await asyncio.sleep(0.6)  # polite delay between pages
+            await asyncio.sleep(0.6)
 
     return jobs
 
 
 # ---------------------------------------------------------------------------
-# Playwright scraper (fallback — handles JS + auth)
+# Sync Playwright helpers (run in thread executor — avoids Windows async
+# subprocess NotImplementedError with SelectorEventLoop)
 # ---------------------------------------------------------------------------
 
-async def _new_browser_context(pw):
-    browser = await pw.chromium.launch(
+def _new_browser_sync(pw):
+    browser = pw.chromium.launch(
         headless=True,
         args=["--no-sandbox", "--disable-setuid-sandbox",
               "--disable-blink-features=AutomationControlled"],
     )
-    context = await browser.new_context(
+    context = browser.new_context(
         user_agent=_USER_AGENT,
         viewport={"width": 1366, "height": 768},
         locale="en-US",
@@ -347,20 +386,20 @@ async def _new_browser_context(pw):
     return browser, context
 
 
-async def _login(page) -> bool:
+def _login_sync(page) -> bool:
     email = settings.LINKEDIN_EMAIL
     password = settings.LINKEDIN_PASSWORD
     if not email or not password:
         return False
     try:
-        await page.goto("https://www.linkedin.com/login",
-                        wait_until="domcontentloaded", timeout=20000)
-        await asyncio.sleep(1.0)
-        await page.fill("#username", email)
-        await page.fill("#password", password)
-        await asyncio.sleep(0.4)
-        await page.click("button[type='submit']")
-        await asyncio.sleep(3)
+        page.goto("https://www.linkedin.com/login",
+                  wait_until="domcontentloaded", timeout=20000)
+        time.sleep(1.0)
+        page.fill("#username", email)
+        page.fill("#password", password)
+        time.sleep(0.4)
+        page.click("button[type='submit']")
+        time.sleep(3)
         url = page.url
         return "login" not in url and "checkpoint" not in url and "authwall" not in url
     except Exception as exc:
@@ -368,14 +407,83 @@ async def _login(page) -> bool:
         return False
 
 
-async def _scrape_jobs_playwright(
+_EXTRACT_CARDS_JS = """
+    () => {
+        const results = [];
+
+        let cards = Array.from(document.querySelectorAll(
+            '.jobs-search__results-list li, .job-search-card, .base-card'
+        ));
+        if (!cards.length) {
+            cards = Array.from(document.querySelectorAll(
+                '.jobs-search-results__list-item, .scaffold-layout__list-item'
+            ));
+        }
+
+        cards.forEach(card => {
+            const titleEl = card.querySelector(
+                'h3.base-search-card__title a, h3.base-search-card__title, ' +
+                '.job-card-list__title, .job-card-container__link, h3 a[href*="/jobs/view/"]'
+            );
+            const linkEl = card.querySelector(
+                'a.base-card__full-link, a[href*="/jobs/view/"], .job-card-list__title--link'
+            );
+            const companyEl = card.querySelector(
+                'h4.base-search-card__subtitle a, h4.base-search-card__subtitle, ' +
+                '.job-card-container__company-name, .artdeco-entity-lockup__subtitle'
+            );
+            const companyLinkEl = card.querySelector(
+                'h4.base-search-card__subtitle a, a[href*="/company/"]'
+            );
+            const locationEl = card.querySelector(
+                '.job-search-card__location, .job-card-container__metadata-item'
+            );
+            const easyApplyEl = card.querySelector(
+                '.job-search-card__easy-apply-label, [aria-label*="Easy Apply"]'
+            );
+
+            let jobUrl = linkEl ? (linkEl.href || linkEl.getAttribute('href') || '') : '';
+            if (!jobUrl) return;
+            if (!jobUrl.startsWith('http')) jobUrl = 'https://www.linkedin.com' + jobUrl;
+            jobUrl = jobUrl.split('?')[0];
+            if (!jobUrl.includes('/jobs/view/')) return;
+
+            let companyUrl = companyLinkEl
+                ? (companyLinkEl.href || companyLinkEl.getAttribute('href') || '')
+                : '';
+            if (companyUrl && !companyUrl.startsWith('http')) {
+                companyUrl = 'https://www.linkedin.com' + companyUrl;
+            }
+            companyUrl = companyUrl.split('?')[0];
+
+            results.push({
+                title:      titleEl   ? titleEl.textContent.trim()   : '',
+                company:    companyEl ? companyEl.textContent.trim()  : 'Unknown',
+                companyUrl: companyUrl,
+                location:   locationEl ? locationEl.textContent.trim() : '',
+                jobUrl:     jobUrl,
+                easyApply:  !!(easyApplyEl || card.textContent.includes('Easy Apply')),
+            });
+        });
+
+        const seen = new Set();
+        return results.filter(j => {
+            if (seen.has(j.jobUrl)) return false;
+            seen.add(j.jobUrl);
+            return true;
+        });
+    }
+"""
+
+
+def _scrape_jobs_playwright_sync(
     role: str,
     location: str,
     radius_km: int,
     exp_level: str = "",
     work_type: str = "",
 ) -> List[dict]:
-    from playwright.async_api import async_playwright
+    from playwright.sync_api import sync_playwright
 
     kw  = urllib.parse.quote_plus(role)
     loc = urllib.parse.quote_plus(location)
@@ -390,121 +498,51 @@ async def _scrape_jobs_playwright(
     if work_type:
         search_url += f"&f_WT={work_type}"
 
-    async with async_playwright() as pw:
-        browser, context = await _new_browser_context(pw)
-        page = await context.new_page()
+    with sync_playwright() as pw:
+        browser, context = _new_browser_sync(pw)
+        page = context.new_page()
         try:
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(2)
+            page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
+            time.sleep(2)
 
             if "login" in page.url or "authwall" in page.url:
                 logger.info("LinkedIn auth wall hit — attempting login...")
-                ok = await _login(page)
+                ok = _login_sync(page)
                 if ok:
-                    await page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
-                    await asyncio.sleep(2)
+                    page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
+                    time.sleep(2)
 
             for _ in range(4):
-                await page.keyboard.press("End")
-                await asyncio.sleep(0.7)
+                page.keyboard.press("End")
+                time.sleep(0.7)
 
-            return await _extract_job_cards(page)
+            return page.evaluate(_EXTRACT_CARDS_JS)
         finally:
-            await browser.close()
+            browser.close()
 
 
-async def _extract_job_cards(page) -> List[dict]:
-    return await page.evaluate("""
-        () => {
-            const results = [];
+def _scrape_person_profile_sync(url: str) -> dict:
+    from playwright.sync_api import sync_playwright
 
-            let cards = Array.from(document.querySelectorAll(
-                '.jobs-search__results-list li, .job-search-card, .base-card'
-            ));
-            if (!cards.length) {
-                cards = Array.from(document.querySelectorAll(
-                    '.jobs-search-results__list-item, .scaffold-layout__list-item'
-                ));
-            }
-
-            cards.forEach(card => {
-                const titleEl = card.querySelector(
-                    'h3.base-search-card__title a, h3.base-search-card__title, ' +
-                    '.job-card-list__title, .job-card-container__link, h3 a[href*="/jobs/view/"]'
-                );
-                const linkEl = card.querySelector(
-                    'a.base-card__full-link, a[href*="/jobs/view/"], .job-card-list__title--link'
-                );
-                const companyEl = card.querySelector(
-                    'h4.base-search-card__subtitle a, h4.base-search-card__subtitle, ' +
-                    '.job-card-container__company-name, .artdeco-entity-lockup__subtitle'
-                );
-                const companyLinkEl = card.querySelector(
-                    'h4.base-search-card__subtitle a, a[href*="/company/"]'
-                );
-                const locationEl = card.querySelector(
-                    '.job-search-card__location, .job-card-container__metadata-item'
-                );
-                const easyApplyEl = card.querySelector(
-                    '.job-search-card__easy-apply-label, [aria-label*="Easy Apply"]'
-                );
-
-                let jobUrl = linkEl ? (linkEl.href || linkEl.getAttribute('href') || '') : '';
-                if (!jobUrl) return;
-                if (!jobUrl.startsWith('http')) jobUrl = 'https://www.linkedin.com' + jobUrl;
-                jobUrl = jobUrl.split('?')[0];
-                if (!jobUrl.includes('/jobs/view/')) return;
-
-                let companyUrl = companyLinkEl
-                    ? (companyLinkEl.href || companyLinkEl.getAttribute('href') || '')
-                    : '';
-                if (companyUrl && !companyUrl.startsWith('http')) {
-                    companyUrl = 'https://www.linkedin.com' + companyUrl;
-                }
-                companyUrl = companyUrl.split('?')[0];
-
-                results.push({
-                    title:      titleEl   ? titleEl.textContent.trim()   : '',
-                    company:    companyEl ? companyEl.textContent.trim()  : 'Unknown',
-                    companyUrl: companyUrl,
-                    location:   locationEl ? locationEl.textContent.trim() : '',
-                    jobUrl:     jobUrl,
-                    easyApply:  !!(easyApplyEl || card.textContent.includes('Easy Apply')),
-                });
-            });
-
-            const seen = new Set();
-            return results.filter(j => {
-                if (seen.has(j.jobUrl)) return false;
-                seen.add(j.jobUrl);
-                return true;
-            });
-        }
-    """)
-
-
-async def _scrape_person_profile_playwright(url: str) -> dict:
-    from playwright.async_api import async_playwright
-
-    async with async_playwright() as pw:
-        browser, context = await _new_browser_context(pw)
-        page = await context.new_page()
+    with sync_playwright() as pw:
+        browser, context = _new_browser_sync(pw)
+        page = context.new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=25000)
-            await asyncio.sleep(2)
+            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            time.sleep(2)
 
             if "login" in page.url or "authwall" in page.url:
                 logger.info("LinkedIn auth wall — attempting login for person profile scrape...")
-                ok = await _login(page)
+                ok = _login_sync(page)
                 if ok:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=25000)
-                    await asyncio.sleep(2)
+                    page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                    time.sleep(2)
 
             for _ in range(6):
-                await page.keyboard.press("End")
-                await asyncio.sleep(0.5)
+                page.keyboard.press("End")
+                time.sleep(0.5)
 
-            return await page.evaluate("""
+            return page.evaluate("""
                 () => {
                     const t  = sel => document.querySelector(sel)?.textContent?.trim() || '';
                     const ts = sel => Array.from(document.querySelectorAll(sel))
@@ -521,25 +559,25 @@ async def _scrape_person_profile_playwright(url: str) -> dict:
                 }
             """)
         finally:
-            await browser.close()
+            browser.close()
 
 
-async def _scrape_company_playwright(url: str) -> dict:
-    from playwright.async_api import async_playwright
+def _scrape_company_sync(url: str) -> dict:
+    from playwright.sync_api import sync_playwright
 
     about_url = url.rstrip("/") + "/about/"
-    async with async_playwright() as pw:
-        browser, context = await _new_browser_context(pw)
-        page = await context.new_page()
+    with sync_playwright() as pw:
+        browser, context = _new_browser_sync(pw)
+        page = context.new_page()
         try:
-            await page.goto(about_url, wait_until="domcontentloaded", timeout=20000)
-            await asyncio.sleep(1.5)
+            page.goto(about_url, wait_until="domcontentloaded", timeout=20000)
+            time.sleep(1.5)
             if "login" in page.url or "authwall" in page.url:
-                await _login(page)
-                await page.goto(about_url, wait_until="domcontentloaded", timeout=20000)
-                await asyncio.sleep(1.5)
+                _login_sync(page)
+                page.goto(about_url, wait_until="domcontentloaded", timeout=20000)
+                time.sleep(1.5)
 
-            return await page.evaluate("""
+            return page.evaluate("""
                 () => ({
                     about: document.querySelector(
                         '.org-about-us-organization-description__text, ' +
@@ -556,25 +594,25 @@ async def _scrape_company_playwright(url: str) -> dict:
                 })
             """)
         finally:
-            await browser.close()
+            browser.close()
 
 
-async def _scrape_posts_playwright(url: str, max_posts: int) -> List[str]:
-    from playwright.async_api import async_playwright
+def _scrape_posts_sync(url: str, max_posts: int) -> List[str]:
+    from playwright.sync_api import sync_playwright
 
     recent_url = url.rstrip("/") + "/recent-activity/shares/"
-    async with async_playwright() as pw:
-        browser, context = await _new_browser_context(pw)
-        page = await context.new_page()
+    with sync_playwright() as pw:
+        browser, context = _new_browser_sync(pw)
+        page = context.new_page()
         try:
-            await page.goto(recent_url, wait_until="domcontentloaded", timeout=20000)
-            await asyncio.sleep(1.5)
+            page.goto(recent_url, wait_until="domcontentloaded", timeout=20000)
+            time.sleep(1.5)
             if "login" in page.url or "authwall" in page.url:
-                await _login(page)
-                await page.goto(recent_url, wait_until="domcontentloaded", timeout=20000)
-                await asyncio.sleep(1.5)
+                _login_sync(page)
+                page.goto(recent_url, wait_until="domcontentloaded", timeout=20000)
+                time.sleep(1.5)
 
-            return await page.evaluate("""
+            return page.evaluate("""
                 (maxPosts) => {
                     const els = Array.from(document.querySelectorAll(
                         '.feed-shared-update-v2__description, .attributed-text-segment-list__content'
@@ -585,7 +623,7 @@ async def _scrape_posts_playwright(url: str, max_posts: int) -> List[str]:
                 }
             """, max_posts)
         finally:
-            await browser.close()
+            browser.close()
 
 
 # ---------------------------------------------------------------------------
@@ -593,16 +631,24 @@ async def _scrape_posts_playwright(url: str, max_posts: int) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def _map_to_targets(raw: List[dict], role: str, location: str) -> List[TargetCompany]:
+    try:
+        from backend.storage import json_store as _store
+        _blacklist = set(_store.read_blacklist())
+    except Exception:
+        _blacklist = set()
+
     targets = []
     for idx, job in enumerate(raw[:50]):
         job_url     = job.get("jobUrl", "")
         company_url = job.get("companyUrl") or ""
         if not job_url:
             continue
+        if job_url in _blacklist:
+            logger.debug(f"Skipping blacklisted job URL: {job_url}")
+            continue
 
         scraped_loc = job.get("location") or location
 
-        # Safety net: drop stale or geographically irrelevant results
         if not _is_recent(job.get("postedAt", "")):
             logger.debug(f"Filtered stale job: {job.get('title')} @ {job.get('company')}")
             continue
@@ -621,7 +667,7 @@ def _map_to_targets(raw: List[dict], role: str, location: str) -> List[TargetCom
                 company_linkedin=company_url,
                 job_title=job.get("title") or role,
                 job_url=job_url,
-                apply_type="easy_apply" if job.get("easyApply") else "external",
+                apply_type="email" if job.get("easyApply") else "external",
                 location=scraped_loc,
                 status="pending",
             ))

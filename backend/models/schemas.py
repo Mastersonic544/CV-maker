@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Literal
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 class BaseSchema(BaseModel):
     class Config:
@@ -135,15 +135,17 @@ class ProfileMeta(BaseSchema):
 class TargetCompany(BaseSchema):
     company_id: str
     company_name: str
-    company_linkedin: HttpUrl
-    company_website: Optional[HttpUrl] = None
+    company_linkedin: Optional[str] = None
+    company_website: Optional[str] = None
     hr_name: Optional[str] = None
-    hr_linkedin: Optional[HttpUrl] = None
+    hr_email: Optional[str] = None
+    hr_linkedin: Optional[str] = None
     ceo_name: Optional[str] = None
-    ceo_linkedin: Optional[HttpUrl] = None
+    ceo_linkedin: Optional[str] = None
     job_title: str
-    job_url: HttpUrl
-    apply_type: Literal["easy_apply", "email", "external"]
+    job_url: str
+    job_description: Optional[str] = None
+    apply_type: Literal["email", "external"]
     location: str
     status: Literal["pending", "ignored", "applied"] = "pending"
 
@@ -185,7 +187,7 @@ class ApplicationHistory(BaseSchema):
     company_name: str
     job_title: str
     date_sent: datetime
-    apply_method: Literal["easy_apply", "email", "external"]
+    apply_method: Literal["email", "external"]
     cv_score_achieved: float
     status: Literal["sent", "opened", "replied", "interview", "rejected"]
     cv_path: str

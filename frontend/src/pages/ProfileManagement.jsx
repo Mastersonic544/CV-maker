@@ -7,7 +7,218 @@ import {
   ChevronDown, ChevronRight, Copy, Check, Loader2,
   AlertCircle, CheckCircle2, Eye, EyeOff, RefreshCw,
   LogOut, RotateCcw, ExternalLink, Camera, Sparkles,
+  PlusCircle, X,
 } from 'lucide-react';
+
+// ── Enrich Panel ──────────────────────────────────────────────────────────────
+const EXTRACTION_PROMPT = `You are a professional career data extractor. Interview me and extract my professional profile.
+
+Ask me about any of the following that I haven't already told you:
+- Full name, location, contact details (email, phone, LinkedIn, GitHub, portfolio)
+- Work experience: every role, company, dates, responsibilities, achievements, tech used
+- Education: degrees, institutions, dates, grades
+- Skills: technical skills, tools, frameworks, languages
+- Projects: personal or professional, description, technologies, outcome
+- Certifications: name, issuer, date
+- Languages spoken
+- Career goals, preferred work style, target roles/industries
+
+Once you have gathered enough information (or I say "done"), output ONLY a JSON object in this exact schema — no explanation, no markdown fences, just raw JSON:
+
+{
+  "personal_info": {
+    "full_name": "", "first_name": "", "last_name": "", "headline": "", "summary": "",
+    "contact": { "email": "", "phone": "", "linkedin": "", "github": "", "portfolio": "" },
+    "location": { "city": "", "country": "", "remote_open": true, "relocation_open": false },
+    "languages": [{ "language": "", "proficiency": "" }]
+  },
+  "work_experience": [{
+    "company": "", "title": "", "start_date": "YYYY-MM", "end_date": "YYYY-MM",
+    "is_current": false, "location": "", "responsibilities": [], "achievements": [], "tech_stack": []
+  }],
+  "education": [{ "institution": "", "degree": "", "field": "", "start_date": "YYYY", "end_date": "YYYY", "grade": "" }],
+  "skills": { "technical": [], "soft": [], "tools": [], "frameworks": [] },
+  "projects": [{ "name": "", "description": "", "technologies": [], "outcome": "", "url": "" }],
+  "certifications": [{ "name": "", "issuer": "", "issued_date": "YYYY-MM" }],
+  "personality_and_work_style": { "work_style": "", "strengths": [], "values": [] },
+  "preferences_and_goals": {
+    "target_roles": [], "target_industries": [], "preferred_locations": [],
+    "work_type": "remote", "open_to_relocation": false
+  }
+}
+
+Start by asking me what I'd like to add or update about my professional profile.`;
+
+const EnrichPanel = ({ userId, onDone }) => {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null); // 'ok' | 'error'
+  const [errorMsg, setErrorMsg] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyPrompt = () => {
+    navigator.clipboard.writeText(EXTRACTION_PROMPT).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const handleSubmit = async () => {
+    if (!text.trim()) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      await usersClient.enrichProfile(userId, text.trim());
+      setResult('ok');
+      setText('');
+      onDone();
+    } catch (err) {
+      setResult('error');
+      setErrorMsg(err.message || 'Enrichment failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!open) return (
+    <button
+      onClick={() => setOpen(true)}
+      className="font-dm flex items-center gap-2 px-4 py-2.5 transition-colors"
+      style={{
+        fontSize: '0.62rem',
+        letterSpacing: '0.18em',
+        textTransform: 'uppercase',
+        color: '#a78bfa',
+        background: 'rgba(139,92,246,0.06)',
+        border: '1px solid rgba(139,92,246,0.3)',
+      }}
+    >
+      <PlusCircle className="w-3 h-3" />
+      Add more info
+    </button>
+  );
+
+  return (
+    <div
+      className="w-full mt-4 p-4 space-y-3"
+      style={{
+        background: 'rgba(139,92,246,0.04)',
+        border: '1px solid rgba(139,92,246,0.25)',
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-3.5 h-3.5" style={{ color: '#a78bfa' }} />
+          <span
+            className="font-dm"
+            style={{ fontSize: '0.6rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#a78bfa' }}
+          >
+            AI Profile Enrichment
+          </span>
+        </div>
+        <button onClick={() => { setOpen(false); setResult(null); setText(''); setCopied(false); }}>
+          <X className="w-3.5 h-3.5" style={{ color: 'rgba(var(--cv-text-rgb), 0.4)' }} />
+        </button>
+      </div>
+
+      {/* Description + copy-prompt CTA */}
+      <div
+        className="p-3 space-y-2"
+        style={{ background: 'rgba(var(--cv-text-rgb), 0.02)', border: '1px solid var(--cv-border)' }}
+      >
+        <p className="font-dm" style={{ fontSize: '0.65rem', color: 'rgba(var(--cv-text-rgb), 0.55)', lineHeight: 1.6 }}>
+          Paste anything — a LinkedIn bio, old CV, a list of projects, job descriptions, certifications, or plain text about yourself.
+          The AI will extract only the new information and merge it into your profile.
+        </p>
+        <div
+          className="flex items-start gap-3 pt-2"
+          style={{ borderTop: '1px solid var(--cv-border)' }}
+        >
+          <div className="flex-1 min-w-0">
+            <p className="font-dm" style={{ fontSize: '0.6rem', color: 'rgba(var(--cv-text-rgb), 0.38)', lineHeight: 1.5 }}>
+              <span style={{ color: '#a78bfa' }}>Tip:</span> Copy the extraction prompt below and paste it into ChatGPT, Claude, or any AI chat.
+              It will interview you and produce a JSON block — paste that JSON back here.
+            </p>
+          </div>
+          <button
+            onClick={handleCopyPrompt}
+            className="font-dm flex items-center gap-1.5 px-3 py-1.5 shrink-0 transition-all"
+            style={{
+              fontSize: '0.55rem',
+              letterSpacing: '0.18em',
+              textTransform: 'uppercase',
+              color: copied ? '#34d399' : '#a78bfa',
+              background: copied ? 'rgba(52,211,153,0.08)' : 'rgba(139,92,246,0.08)',
+              border: `1px solid ${copied ? 'rgba(52,211,153,0.3)' : 'rgba(139,92,246,0.3)'}`,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {copied
+              ? <><Check className="w-3 h-3" /> Copied!</>
+              : <><Copy className="w-3 h-3" /> Copy prompt</>}
+          </button>
+        </div>
+      </div>
+
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="Paste the JSON (or any raw text) returned by the AI here…"
+        rows={7}
+        className="cv-input font-dm w-full resize-y"
+        style={{ fontSize: '0.7rem', lineHeight: 1.6 }}
+      />
+
+      {result === 'ok' && (
+        <div
+          className="flex items-center gap-2 px-3 py-2 font-dm"
+          style={{ fontSize: '0.65rem', color: '#34d399', background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.25)' }}
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Profile updated — review the new AI-filled fields above.
+        </div>
+      )}
+      {result === 'error' && (
+        <div
+          className="flex items-center gap-2 px-3 py-2 font-dm"
+          style={{ fontSize: '0.65rem', color: '#f87171', background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.25)' }}
+        >
+          <AlertCircle className="w-3.5 h-3.5" />
+          {errorMsg}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={() => { setOpen(false); setResult(null); setText(''); }}
+          className="font-dm px-4 py-2 transition-colors"
+          style={{ fontSize: '0.62rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.4)', border: '1px solid var(--cv-border)' }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={loading || !text.trim()}
+          className="font-dm flex items-center gap-2 px-5 py-2 transition-colors"
+          style={{
+            fontSize: '0.62rem',
+            letterSpacing: '0.16em',
+            textTransform: 'uppercase',
+            color: loading || !text.trim() ? 'rgba(139,92,246,0.4)' : '#a78bfa',
+            background: loading || !text.trim() ? 'rgba(139,92,246,0.03)' : 'rgba(139,92,246,0.1)',
+            border: `1px solid ${loading || !text.trim() ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.4)'}`,
+            cursor: loading || !text.trim() ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {loading
+            ? <><Loader2 className="w-3 h-3 animate-spin" /> Analyzing…</>
+            : <><Sparkles className="w-3 h-3" /> Enrich Profile</>}
+        </button>
+      </div>
+    </div>
+  );
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function getInitials(name = '') {
@@ -326,13 +537,75 @@ const ProfileTab = ({ userId, user }) => {
 };
 
 // ── Tab 2: API Keys ───────────────────────────────────────────────────────────
-const KEY_DOCS = {
-  OPENROUTER_API_KEY: 'openrouter.ai/keys',
-  LINKEDIN_EMAIL: 'linkedin.com',
-  LINKEDIN_PASSWORD: 'linkedin.com',
-  BREVO_SMTP_USER: 'app.brevo.com',
-  BREVO_SMTP_PASSWORD: 'app.brevo.com',
-  APIFY_TOKEN: 'apify.com',
+const KEY_INFO = {
+  OPENROUTER_API_KEY: {
+    url: 'https://openrouter.ai/keys',
+    what: 'Powers all AI features — CV generation, HR persona research, cover letters, role suggestions.',
+    howTo: ['Go to openrouter.ai/keys', 'Sign in or create a free account', 'Click "Create Key", give it a name, copy it'],
+  },
+  LINKEDIN_EMAIL: {
+    url: 'https://linkedin.com',
+    what: 'Your LinkedIn login email. Used to scrape job listings from LinkedIn.',
+    howTo: ['Use the same email you log into LinkedIn with'],
+  },
+  LINKEDIN_PASSWORD: {
+    url: 'https://linkedin.com',
+    what: 'Your LinkedIn password. Stored encrypted locally, never transmitted anywhere.',
+    howTo: ['Use the same password you log into LinkedIn with'],
+  },
+  SMTP_USER: {
+    url: 'https://mail.google.com',
+    what: 'Your Gmail address. Emails to HR contacts are sent directly from this address.',
+    howTo: ['Enter your full Gmail address — e.g. you@gmail.com'],
+  },
+  SMTP_PASSWORD: {
+    url: 'https://myaccount.google.com/apppasswords',
+    what: 'A Gmail App Password — a 16-char code that lets this app send emails without using your real password.',
+    howTo: [
+      'Go to myaccount.google.com/security',
+      'Enable 2-Step Verification if not already on',
+      'Go to myaccount.google.com/apppasswords',
+      'Name it "cvmaker", click Create',
+      'Copy the 16-char code (spaces are fine)',
+    ],
+  },
+  SENDER_NAME: {
+    url: null,
+    what: 'Your full name as it appears in the From field of outgoing emails.',
+    howTo: ['Enter your first and last name — e.g. Yassine Dhouib'],
+  },
+};
+
+const KeyTooltip = ({ info }) => {
+  if (!info) return null;
+  return (
+    <div
+      className="absolute left-0 top-full mt-2 z-50 w-72 p-3 space-y-2 font-dm"
+      style={{
+        background: 'var(--cv-bg)',
+        border: '1px solid var(--cv-cyan)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+        pointerEvents: 'none',
+      }}
+    >
+      <p style={{ fontSize: '0.65rem', color: 'rgba(var(--cv-text-rgb), 0.75)', lineHeight: 1.55 }}>
+        {info.what}
+      </p>
+      <div>
+        <p style={{ fontSize: '0.5rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--cv-cyan)', marginBottom: '0.35rem' }}>
+          How to get it
+        </p>
+        <ol className="space-y-0.5" style={{ paddingLeft: '0.75rem', listStyleType: 'decimal' }}>
+          {info.howTo.map((step, i) => (
+            <li key={i} style={{ fontSize: '0.62rem', color: 'rgba(var(--cv-text-rgb), 0.6)', lineHeight: 1.5 }}>{step}</li>
+          ))}
+        </ol>
+      </div>
+      {info.url && (
+        <p style={{ fontSize: '0.55rem', color: 'var(--cv-cyan)', opacity: 0.7 }}>{info.url.replace('https://', '')}</p>
+      )}
+    </div>
+  );
 };
 
 const ApiKeysTab = ({ userId }) => {
@@ -414,7 +687,7 @@ const ApiKeysTab = ({ userId }) => {
       {keys.map(k => {
         const s = states[k.key] || {};
         const isSet = k.is_set;
-        const docUrl = KEY_DOCS[k.key];
+        const info = KEY_INFO[k.key];
 
         return (
           <div
@@ -435,13 +708,21 @@ const ApiKeysTab = ({ userId }) => {
                     boxShadow: isSet ? '0 0 8px #10b981' : 'none',
                   }}
                 />
-                <div className="min-w-0">
-                  <p
-                    className="font-syne"
-                    style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--cv-text)', letterSpacing: '-0.01em' }}
+                <div className="relative min-w-0">
+                  <div
+                    className="group inline-block"
+                    onMouseEnter={() => patchState(k.key, { showTooltip: true })}
+                    onMouseLeave={() => patchState(k.key, { showTooltip: false })}
+                    style={{ cursor: 'default' }}
                   >
-                    {k.label}
-                  </p>
+                    <p
+                      className="font-syne"
+                      style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--cv-text)', letterSpacing: '-0.01em', borderBottom: '1px dashed rgba(var(--cv-text-rgb), 0.2)' }}
+                    >
+                      {k.label}
+                    </p>
+                    {s.showTooltip && <KeyTooltip info={info} />}
+                  </div>
                   <p
                     className="font-dm mt-0.5"
                     style={{
@@ -465,9 +746,9 @@ const ApiKeysTab = ({ userId }) => {
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                {docUrl && (
+                {info?.url && (
                   <a
-                    href={`https://${docUrl}`}
+                    href={info.url}
                     target="_blank"
                     rel="noreferrer"
                     className="p-2 transition-colors"
@@ -924,33 +1205,38 @@ const JsonEditorTab = ({ userId }) => {
         </div>
       )}
 
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <p
-          className="font-dm"
-          style={{
-            fontSize: '0.6rem',
-            letterSpacing: '0.2em',
-            textTransform: 'uppercase',
-            color: 'rgba(var(--cv-text-rgb), 0.55)',
-          }}
-        >
-          {sections.length} section{sections.length !== 1 ? 's' : ''} in profile
-        </p>
-        <button
-          onClick={() => navigate('/onboarding')}
-          className="font-dm flex items-center gap-2 px-4 py-2.5 transition-colors"
-          style={{
-            fontSize: '0.62rem',
-            letterSpacing: '0.18em',
-            textTransform: 'uppercase',
-            color: '#f59e0b',
-            background: 'rgba(245,158,11,0.06)',
-            border: '1px solid rgba(245,158,11,0.3)',
-          }}
-        >
-          <RotateCcw className="w-3 h-3" />
-          Redo onboarding
-        </button>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <p
+            className="font-dm"
+            style={{
+              fontSize: '0.6rem',
+              letterSpacing: '0.2em',
+              textTransform: 'uppercase',
+              color: 'rgba(var(--cv-text-rgb), 0.55)',
+            }}
+          >
+            {sections.length} section{sections.length !== 1 ? 's' : ''} in profile
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <EnrichPanel userId={userId} onDone={load} />
+            <button
+              onClick={() => navigate('/onboarding')}
+              className="font-dm flex items-center gap-2 px-4 py-2.5 transition-colors"
+              style={{
+                fontSize: '0.62rem',
+                letterSpacing: '0.18em',
+                textTransform: 'uppercase',
+                color: '#f59e0b',
+                background: 'rgba(245,158,11,0.06)',
+                border: '1px solid rgba(245,158,11,0.3)',
+              }}
+            >
+              <RotateCcw className="w-3 h-3" />
+              Redo onboarding
+            </button>
+          </div>
+        </div>
       </div>
       <div className="space-y-2">
         {sections.map(([key, val]) => (

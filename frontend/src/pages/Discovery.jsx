@@ -3,15 +3,212 @@ import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import {
   Zap, MapPin, Target, Search, Check, CheckCircle2, ChevronRight,
-  PlusCircle, X, ExternalLink, Trash2, User, Briefcase, Loader2,
+  PlusCircle, X, Trash2, User, Briefcase, Loader2, Pencil, FileJson,
+  ExternalLink, AlertCircle,
 } from 'lucide-react';
+
+// ── Apify JSON Import Modal ─────────────────────────────────────────────────
+
+const APIFY_URL = 'https://apify.com/curious_coder/linkedin-jobs-scraper';
+
+const STEPS = [
+  {
+    n: '01',
+    title: 'Open the Apify scraper',
+    body: 'Go to the free LinkedIn Jobs Scraper on Apify. No account needed for a few runs.',
+    link: APIFY_URL,
+    linkLabel: 'Open Apify →',
+  },
+  {
+    n: '02',
+    title: 'Fill in your search',
+    body: 'Enter your desired job title, location, and any filters. Click "Start" and wait for it to finish.',
+    link: null,
+  },
+  {
+    n: '03',
+    title: 'Copy the JSON output',
+    body: 'Click "Export" → "JSON", copy everything, and paste it into the box below.',
+    link: null,
+  },
+];
+
+const ApifyImportModal = ({ onClose, onAdded }) => {
+  const [jsonText, setJsonText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null); // { added, targets }
+
+  const handleImport = async () => {
+    const trimmed = jsonText.trim();
+    if (!trimmed) { setError('Paste your Apify JSON first.'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const res = await apiClient.importJsonTargets(trimmed);
+      setResult(res);
+      res.targets.forEach(t => onAdded(t));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'var(--cv-overlay)', backdropFilter: 'blur(8px)' }}
+    >
+      <div
+        className="w-full max-w-2xl max-h-[92vh] flex flex-col"
+        style={{
+          background: 'var(--cv-surface)',
+          border: '1px solid rgba(var(--cv-text-rgb), 0.10)',
+          boxShadow: '0 30px 80px rgba(0,0,0,0.6)',
+        }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between p-6 shrink-0"
+          style={{ borderBottom: '1px solid var(--cv-border)' }}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 flex items-center justify-center shrink-0"
+              style={{ background: 'rgba(var(--cv-cyan-rgb), 0.06)', border: '1px solid rgba(var(--cv-cyan-rgb), 0.3)' }}
+            >
+              <FileJson className="w-4 h-4" style={{ color: 'var(--cv-cyan)' }} />
+            </div>
+            <div>
+              <h2 className="font-syne" style={{ fontWeight: 700, fontSize: '1.1rem', letterSpacing: '-0.02em', color: 'var(--cv-text)' }}>
+                Import from Apify
+              </h2>
+              <p className="font-dm mt-0.5" style={{ fontSize: '0.58rem', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.42)' }}>
+                Free LinkedIn job scraper · no API key needed
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 transition-colors" style={{ color: 'rgba(var(--cv-text-rgb), 0.55)', border: '1px solid var(--cv-border)' }}>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 custom-scrollbar">
+          {result ? (
+            /* Success state */
+            <div className="p-8 text-center">
+              <CheckCircle2 className="w-12 h-12 mx-auto mb-4" style={{ color: '#34d399' }} />
+              <p className="font-syne mb-1" style={{ fontWeight: 700, fontSize: '1.2rem', color: 'var(--cv-text)' }}>
+                {result.added} job{result.added !== 1 ? 's' : ''} imported.
+              </p>
+              <p className="font-dm mb-6" style={{ fontSize: '0.72rem', color: 'rgba(var(--cv-text-rgb), 0.55)' }}>
+                They've been added to your target list below. Review and finalize when ready.
+              </p>
+              <button onClick={onClose} className="cv-btn-prim">Done</button>
+            </div>
+          ) : (
+            <div className="p-6 space-y-6">
+              {/* Steps */}
+              <div className="space-y-3">
+                {STEPS.map(step => (
+                  <div
+                    key={step.n}
+                    className="flex gap-4 p-4"
+                    style={{ background: 'var(--cv-card-bg)', border: '1px solid var(--cv-border)' }}
+                  >
+                    <span
+                      className="font-syne shrink-0"
+                      style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--cv-cyan)', letterSpacing: '-0.03em', lineHeight: 1, marginTop: 2 }}
+                    >
+                      {step.n}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-syne mb-1" style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--cv-text)', letterSpacing: '-0.01em' }}>
+                        {step.title}
+                      </p>
+                      <p className="font-dm" style={{ fontSize: '0.68rem', color: 'rgba(var(--cv-text-rgb), 0.58)', lineHeight: 1.6 }}>
+                        {step.body}
+                      </p>
+                      {step.link && (
+                        <a
+                          href={step.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 font-dm mt-2"
+                          style={{ fontSize: '0.62rem', color: 'var(--cv-cyan)', letterSpacing: '0.06em' }}
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          {step.linkLabel}
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* JSON textarea */}
+              <div>
+                <label
+                  className="block font-dm mb-2"
+                  style={{ fontSize: '0.55rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.55)' }}
+                >
+                  Paste Apify JSON output
+                </label>
+                <textarea
+                  value={jsonText}
+                  onChange={e => { setJsonText(e.target.value); setError(''); }}
+                  placeholder={'[\n  {\n    "title": "Frontend Developer",\n    "company": { "name": "Acme" },\n    "url": "https://linkedin.com/jobs/view/...",\n    "location": "Paris"\n  }\n]'}
+                  rows={10}
+                  className="cv-input font-dm"
+                  style={{ resize: 'vertical', fontSize: '0.68rem', lineHeight: 1.6, fontFamily: "'DM Mono', monospace" }}
+                  spellCheck={false}
+                />
+                <p className="font-dm mt-1.5" style={{ fontSize: '0.58rem', color: 'rgba(var(--cv-text-rgb), 0.38)', letterSpacing: '0.04em' }}>
+                  Any Apify output format is accepted — the AI will normalize it if needed.
+                </p>
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-2 px-4 py-3 font-dm" style={{ fontSize: '0.7rem', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}>
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  {error}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {!result && (
+          <div
+            className="flex justify-end gap-3 p-6 shrink-0"
+            style={{ borderTop: '1px solid var(--cv-border)' }}
+          >
+            <button onClick={onClose} className="cv-btn-ghost">Cancel</button>
+            <button
+              onClick={handleImport}
+              disabled={loading || !jsonText.trim()}
+              className="cv-btn-prim flex items-center gap-2"
+            >
+              {loading
+                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Importing…</>
+                : <><FileJson className="w-3.5 h-3.5" /> Import Jobs</>}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // ── Manual Add Modal ────────────────────────────────────────────────────────
 
 const EMPTY_FORM = {
   company_name: '', job_title: '', job_url: '', location: '',
-  apply_type: 'external', company_linkedin: '', company_website: '',
-  hr_name: '', hr_linkedin: '', ceo_name: '', ceo_linkedin: '',
+  apply_type: 'email', company_linkedin: '', company_website: '',
+  hr_name: '', hr_email: '', hr_linkedin: '', ceo_name: '', ceo_linkedin: '',
+  job_description: '',
 };
 
 const MonoLabel = ({ children }) => (
@@ -26,6 +223,21 @@ const MonoLabel = ({ children }) => (
   >
     {children}
   </label>
+);
+
+const ModalField = ({ label, value, onChange, placeholder, required = false, type = 'text' }) => (
+  <div>
+    <MonoLabel>
+      {label}{required && <span style={{ color: '#f87171', marginLeft: 4 }}>*</span>}
+    </MonoLabel>
+    <input
+      type={type}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="cv-input"
+    />
+  </div>
 );
 
 const ManualAddModal = ({ onClose, onAdded }) => {
@@ -53,21 +265,6 @@ const ManualAddModal = ({ onClose, onAdded }) => {
       setSaving(false);
     }
   };
-
-  const Field = ({ label, k, placeholder, required = false, type = 'text' }) => (
-    <div>
-      <MonoLabel>
-        {label}{required && <span style={{ color: '#f87171', marginLeft: 4 }}>*</span>}
-      </MonoLabel>
-      <input
-        type={type}
-        value={form[k]}
-        onChange={e => set(k, e.target.value)}
-        placeholder={placeholder}
-        className="cv-input"
-      />
-    </div>
-  );
 
   return (
     <div
@@ -137,12 +334,12 @@ const ManualAddModal = ({ onClose, onAdded }) => {
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Company name" k="company_name" placeholder="Acme Corp" required />
-            <Field label="Job title" k="job_title" placeholder="Senior Frontend Developer" required />
+            <ModalField label="Company name" value={form.company_name} onChange={v => set('company_name', v)} placeholder="Acme Corp" required />
+            <ModalField label="Job title" value={form.job_title} onChange={v => set('job_title', v)} placeholder="Senior Frontend Developer" required />
           </div>
-          <Field label="Job posting URL" k="job_url" placeholder="https://linkedin.com/jobs/view/..." required />
+          <ModalField label="Job posting URL" value={form.job_url} onChange={v => set('job_url', v)} placeholder="https://linkedin.com/jobs/view/..." required />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Location" k="location" placeholder="Remote / Paris" required />
+            <ModalField label="Location" value={form.location} onChange={v => set('location', v)} placeholder="Remote / Paris" required />
             <div>
               <MonoLabel>Apply type</MonoLabel>
               <select
@@ -150,11 +347,29 @@ const ManualAddModal = ({ onClose, onAdded }) => {
                 onChange={e => set('apply_type', e.target.value)}
                 className="cv-input"
               >
-                <option value="easy_apply">LinkedIn Easy Apply</option>
                 <option value="external">External (redirect)</option>
                 <option value="email">Email Application</option>
               </select>
             </div>
+          </div>
+
+          {/* Optional job description */}
+          <div>
+            <MonoLabel>Job description (optional — paste the full posting)</MonoLabel>
+            <textarea
+              value={form.job_description}
+              onChange={e => set('job_description', e.target.value)}
+              placeholder="Paste the full job description here. Used by the AI to build a precise HR persona when the URL can't be scraped (e.g. external apply forms)."
+              rows={5}
+              className="cv-input"
+              style={{ resize: 'vertical', fontFamily: 'inherit' }}
+            />
+            <p
+              className="font-dm mt-1"
+              style={{ fontSize: '0.58rem', color: 'rgba(var(--cv-text-rgb), 0.38)', letterSpacing: '0.04em' }}
+            >
+              Not required — but strongly recommended for external jobs where the LinkedIn preview differs from the real form.
+            </p>
           </div>
 
           <div className="pt-4" style={{ borderTop: '1px solid rgba(var(--cv-text-rgb), 0.05)' }}>
@@ -168,18 +383,19 @@ const ManualAddModal = ({ onClose, onAdded }) => {
               </p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Company LinkedIn URL" k="company_linkedin" placeholder="linkedin.com/company/acme" />
-              <Field label="Company website" k="company_website" placeholder="https://acme.com" />
+              <ModalField label="Company LinkedIn URL" value={form.company_linkedin} onChange={v => set('company_linkedin', v)} placeholder="linkedin.com/company/acme" />
+              <ModalField label="Company website" value={form.company_website} onChange={v => set('company_website', v)} placeholder="https://acme.com" />
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="HR contact name" k="hr_name" placeholder="Jane Smith" />
-            <Field label="HR LinkedIn URL" k="hr_linkedin" placeholder="linkedin.com/in/jane" />
+            <ModalField label="HR contact name" value={form.hr_name} onChange={v => set('hr_name', v)} placeholder="Jane Smith" />
+            <ModalField label="HR email" value={form.hr_email} onChange={v => set('hr_email', v)} placeholder="hr@company.com" type="email" />
           </div>
+          <ModalField label="HR LinkedIn URL" value={form.hr_linkedin} onChange={v => set('hr_linkedin', v)} placeholder="linkedin.com/in/jane" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="CEO / Founder name" k="ceo_name" placeholder="John Doe" />
-            <Field label="CEO LinkedIn URL" k="ceo_linkedin" placeholder="linkedin.com/in/john" />
+            <ModalField label="CEO / Founder name" value={form.ceo_name} onChange={v => set('ceo_name', v)} placeholder="John Doe" />
+            <ModalField label="CEO LinkedIn URL" value={form.ceo_linkedin} onChange={v => set('ceo_linkedin', v)} placeholder="linkedin.com/in/john" />
           </div>
 
           <div className="flex justify-end gap-3 pt-2 flex-wrap">
@@ -194,6 +410,160 @@ const ManualAddModal = ({ onClose, onAdded }) => {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+};
+
+// ── Edit Target Modal ───────────────────────────────────────────────────────
+
+const EditTargetModal = ({ target, onClose, onSaved }) => {
+  const [form, setForm] = useState({
+    company_name: target.company_name || '',
+    job_title: target.job_title || '',
+    job_url: target.job_url || '',
+    location: target.location || '',
+    apply_type: target.apply_type || 'external',
+    company_linkedin: target.company_linkedin || '',
+    company_website: target.company_website || '',
+    hr_name: target.hr_name || '',
+    hr_email: target.hr_email || '',
+    hr_linkedin: target.hr_linkedin || '',
+    ceo_name: target.ceo_name || '',
+    ceo_linkedin: target.ceo_linkedin || '',
+    job_description: target.job_description || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.company_name || !form.job_title || !form.job_url || !form.location) {
+      setError('Company name, job title, URL and location are required.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const updated = await apiClient.updateTarget(target.company_id, form);
+      onSaved(updated);
+      setSaved(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'var(--cv-overlay)', backdropFilter: 'blur(8px)' }}
+    >
+      <div
+        className="w-full max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar"
+        style={{ background: 'var(--cv-surface)', border: '1px solid rgba(var(--cv-text-rgb), 0.10)', boxShadow: '0 30px 80px rgba(0,0,0,0.6)' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 sticky top-0 z-10" style={{ borderBottom: '1px solid var(--cv-border)', background: 'var(--cv-surface)' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ background: 'rgba(var(--cv-cyan-rgb), 0.06)', border: '1px solid rgba(var(--cv-cyan-rgb), 0.3)' }}>
+              <Pencil className="w-4 h-4" style={{ color: 'var(--cv-cyan)' }} />
+            </div>
+            <div>
+              <h2 className="font-syne" style={{ fontWeight: 700, fontSize: '1.1rem', letterSpacing: '-0.02em', color: 'var(--cv-text)' }}>
+                Edit Target
+              </h2>
+              <p className="font-dm mt-0.5" style={{ fontSize: '0.58rem', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.42)' }}>
+                {target.company_name} — changes rebuild the HR persona
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 transition-colors" style={{ color: 'rgba(var(--cv-text-rgb), 0.55)', border: '1px solid var(--cv-border)' }}>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {saved ? (
+          <div className="p-8 text-center">
+            <CheckCircle2 className="w-10 h-10 mx-auto mb-3" style={{ color: '#34d399' }} />
+            <p className="font-syne mb-1" style={{ fontWeight: 700, color: 'var(--cv-text)' }}>Target updated.</p>
+            <p className="font-dm mb-5" style={{ fontSize: '0.72rem', color: 'rgba(var(--cv-text-rgb), 0.55)' }}>
+              The HR persona for this company has been reset. Regenerate the CV in Build CV to apply the changes.
+            </p>
+            <button onClick={onClose} className="cv-btn-prim">Done</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="p-6 space-y-5">
+            {error && (
+              <div className="px-4 py-3 font-dm" style={{ fontSize: '0.7rem', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}>
+                {error}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <ModalField label="Company name" value={form.company_name} onChange={v => set('company_name', v)} placeholder="Acme Corp" required />
+              <ModalField label="Job title" value={form.job_title} onChange={v => set('job_title', v)} placeholder="Senior Frontend Developer" required />
+            </div>
+            <ModalField label="Job posting URL" value={form.job_url} onChange={v => set('job_url', v)} placeholder="https://linkedin.com/jobs/view/..." required />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <ModalField label="Location" value={form.location} onChange={v => set('location', v)} placeholder="Remote / Paris" required />
+              <div>
+                <MonoLabel>Apply type</MonoLabel>
+                <select value={form.apply_type} onChange={e => set('apply_type', e.target.value)} className="cv-input">
+                  <option value="external">External (redirect)</option>
+                  <option value="email">Email Application</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <MonoLabel>Job description (optional — paste the full posting)</MonoLabel>
+              <textarea
+                value={form.job_description}
+                onChange={e => set('job_description', e.target.value)}
+                placeholder="Paste the full job description here…"
+                rows={5}
+                className="cv-input"
+                style={{ resize: 'vertical', fontFamily: 'inherit' }}
+              />
+            </div>
+
+            <div className="pt-4" style={{ borderTop: '1px solid rgba(var(--cv-text-rgb), 0.05)' }}>
+              <div className="flex items-center gap-3 mb-4">
+                <span style={{ width: 12, height: 1, background: 'rgba(var(--cv-text-rgb), 0.32)' }} />
+                <p className="font-dm" style={{ fontSize: '0.55rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.55)' }}>
+                  Optional. Improves persona research.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <ModalField label="Company LinkedIn URL" value={form.company_linkedin} onChange={v => set('company_linkedin', v)} placeholder="linkedin.com/company/acme" />
+                <ModalField label="Company website" value={form.company_website} onChange={v => set('company_website', v)} placeholder="https://acme.com" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <ModalField label="HR contact name" value={form.hr_name} onChange={v => set('hr_name', v)} placeholder="Jane Smith" />
+              <ModalField label="HR email" value={form.hr_email} onChange={v => set('hr_email', v)} placeholder="hr@company.com" type="email" />
+            </div>
+            <ModalField label="HR LinkedIn URL" value={form.hr_linkedin} onChange={v => set('hr_linkedin', v)} placeholder="linkedin.com/in/jane" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <ModalField label="CEO / Founder name" value={form.ceo_name} onChange={v => set('ceo_name', v)} placeholder="John Doe" />
+              <ModalField label="CEO LinkedIn URL" value={form.ceo_linkedin} onChange={v => set('ceo_linkedin', v)} placeholder="linkedin.com/in/john" />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2 flex-wrap">
+              <button type="button" onClick={onClose} className="cv-btn-ghost">Cancel</button>
+              <button type="submit" disabled={saving} className="cv-btn-purple flex items-center gap-2">
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -214,7 +584,9 @@ const Discovery = () => {
   const [selectedTargets, setSelectedTargets] = useState(new Set());
   const [scrapeError, setScrapeError] = useState(null);
   const [showManualModal, setShowManualModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [editingTarget, setEditingTarget] = useState(null);
 
   useEffect(() => {
     apiClient.getTargets()
@@ -273,6 +645,10 @@ const Discovery = () => {
     });
   };
 
+  const handleEditSaved = (updated) => {
+    setTargets(prev => prev.map(t => t.company_id === updated.company_id ? updated : t));
+  };
+
   const handleDelete = async (companyId) => {
     setDeletingId(companyId);
     try {
@@ -293,11 +669,6 @@ const Discovery = () => {
     } catch {
       setScrapeError('Failed to finalize targets.');
     }
-  };
-
-  const safeJobUrl = (url) => {
-    if (!url) return null;
-    try { return new URL(url).href; } catch { return null; }
   };
 
   // ── Section header building block
@@ -564,6 +935,18 @@ const Discovery = () => {
                 </span>
               )}
               <button
+                onClick={() => setShowImportModal(true)}
+                className="p-2 transition-colors"
+                style={{
+                  color: 'var(--cv-cyan)',
+                  background: 'rgba(var(--cv-cyan-rgb), 0.04)',
+                  border: '1px solid rgba(var(--cv-cyan-rgb), 0.2)',
+                }}
+                title="Import from Apify JSON"
+              >
+                <FileJson className="w-3.5 h-3.5" />
+              </button>
+              <button
                 onClick={() => setShowManualModal(true)}
                 className="font-dm flex items-center gap-2 px-3 py-2 transition-colors"
                 style={{
@@ -582,11 +965,26 @@ const Discovery = () => {
           }
         />
 
+        {targets.some(t => t.company_id.startsWith('mock_')) && (
+          <div
+            className="mb-4 px-4 py-3 font-dm"
+            style={{
+              fontSize: '0.7rem',
+              background: 'rgba(139,92,246,0.06)',
+              border: '1px solid rgba(139,92,246,0.25)',
+              color: '#a78bfa',
+            }}
+          >
+            LinkedIn scraping is unavailable right now — showing placeholder companies.
+            The <strong>View</strong> links open a real LinkedIn job search for your role.
+            Replace these with real listings using <strong>Add Manually</strong>, or they'll be used as demo targets.
+          </div>
+        )}
+
         {targets.length > 0 ? (
           <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1 custom-scrollbar">
             {targets.map((target, idx) => {
               const isSelected = selectedTargets.has(target.company_id);
-              const jobUrl = safeJobUrl(target.job_url);
               return (
                 <div
                   key={target.company_id || idx}
@@ -639,6 +1037,21 @@ const Discovery = () => {
                             Manual
                           </span>
                         )}
+                        {target.company_id.startsWith('mock_') && (
+                          <span
+                            className="font-dm px-1.5 py-0.5"
+                            style={{
+                              fontSize: '0.5rem',
+                              letterSpacing: '0.2em',
+                              textTransform: 'uppercase',
+                              background: 'rgba(139,92,246,0.08)',
+                              color: '#a78bfa',
+                              border: '1px solid rgba(139,92,246,0.25)',
+                            }}
+                          >
+                            Demo
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-3 mt-1 flex-wrap font-dm" style={{ fontSize: '0.65rem', color: 'rgba(var(--cv-text-rgb), 0.55)' }}>
@@ -684,34 +1097,20 @@ const Discovery = () => {
                     >
                       {target.apply_type.replace('_', ' ')}
                     </span>
-                    <div className="flex items-center gap-2">
-                      {jobUrl ? (
-                        <a
-                          href={jobUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-dm flex items-center gap-1 transition-colors"
-                          style={{ fontSize: '0.58rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--cv-cyan)' }}
-                          title={jobUrl}
-                        >
-                          View <ExternalLink className="w-2.5 h-2.5" />
-                        </a>
-                      ) : (
-                        <span
-                          className="font-dm"
-                          style={{ fontSize: '0.58rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(var(--cv-text-rgb), 0.32)' }}
-                        >
-                          No URL
-                        </span>
-                      )}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setEditingTarget(target)}
+                        className="p-1 transition-colors"
+                        style={{ color: 'rgba(var(--cv-text-rgb), 0.42)', border: '1px solid rgba(var(--cv-text-rgb), 0.06)' }}
+                        title="Edit target"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
                       <button
                         onClick={() => handleDelete(target.company_id)}
                         disabled={deletingId === target.company_id}
                         className="p-1 transition-colors"
-                        style={{
-                          color: 'rgba(var(--cv-text-rgb), 0.42)',
-                          border: '1px solid rgba(var(--cv-text-rgb), 0.06)',
-                        }}
+                        style={{ color: 'rgba(var(--cv-text-rgb), 0.42)', border: '1px solid rgba(var(--cv-text-rgb), 0.06)' }}
                         title="Remove target"
                       >
                         {deletingId === target.company_id
@@ -755,10 +1154,23 @@ const Discovery = () => {
         )}
       </div>
 
+      {showImportModal && (
+        <ApifyImportModal
+          onClose={() => setShowImportModal(false)}
+          onAdded={handleManualAdded}
+        />
+      )}
       {showManualModal && (
         <ManualAddModal
           onClose={() => setShowManualModal(false)}
           onAdded={handleManualAdded}
+        />
+      )}
+      {editingTarget && (
+        <EditTargetModal
+          target={editingTarget}
+          onClose={() => setEditingTarget(null)}
+          onSaved={(updated) => { handleEditSaved(updated); }}
         />
       )}
     </div>

@@ -169,6 +169,23 @@ def write_interview_session(company_id: str, session_id: str, data: InterviewSes
     write_json_atomic(path, data.model_dump(mode='json'))
 
 
+def read_blacklist() -> list:
+    """Read the list of blacklisted job URLs."""
+    path = _user_data_dir() / "blacklist.json"
+    if not path.exists():
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def write_blacklist(urls: list):
+    """Write the list of blacklisted job URLs."""
+    write_json_atomic(_user_data_dir() / "blacklist.json", urls)
+
+
 def get_applications_dir() -> Path:
     """Returns the active user's applications directory."""
     return _user_data_dir() / "applications"

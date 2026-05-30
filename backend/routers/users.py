@@ -187,7 +187,9 @@ def set_api_key(
     body: dict = Body(...),
 ):
     _get_user_or_404(user_id)
-    value = body.get("value", "")
+    value = body.get("value", "").strip()
+    if key_name == "SMTP_PASSWORD":
+        value = value.replace(" ", "")  # App Passwords are displayed with spaces but sent without
     if not value:
         raise HTTPException(status_code=422, detail="'value' is required")
     valid_keys = {e["key"] for e in SUPPORTED_KEYS}
@@ -248,6 +250,30 @@ async def onboarding(
     else:
         user_service.update_user(user_id, {"onboarding_complete": True})
 
+    return {"ok": True, "profile": profile}
+
+
+# ---------------------------------------------------------------------------
+# Profile enrichment (add data without redoing onboarding)
+# ---------------------------------------------------------------------------
+
+@router.post("/{user_id}/enrich", summary="Enrich existing profile with new data dump")
+async def enrich_profile(
+    user_id: str = FPath(...),
+    body: dict = Body(...),
+):
+    _get_user_or_404(user_id)
+    dump_text: str = (body.get("dump_text") or "").strip()
+    if not dump_text:
+        raise HTTPException(status_code=422, detail="dump_text is required")
+    try:
+        profile = await user_service.enrich_profile_from_dump(
+            user_id=user_id,
+            dump_text=dump_text,
+        )
+    except Exception as exc:
+        logger.error(f"Profile enrichment failed for {user_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
     return {"ok": True, "profile": profile}
 
 

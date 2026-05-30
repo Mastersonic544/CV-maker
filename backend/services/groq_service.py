@@ -11,12 +11,71 @@ from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Initialize OpenRouter / LLM configuration
-# We use requests to call OpenRouter as it's OpenAI-compatible and doesn't require extra dependencies
-llm_client_available = bool(settings.OPENROUTER_API_KEY)
+_GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+_GROQ_FALLBACK_MODEL = "llama-3.3-70b-versatile"
 
-if not llm_client_available:
-    logger.warning("OPENROUTER_API_KEY not set in .env — using mocked LLM responses. Set the platform key to enable live AI.")
+
+def _get_openrouter_key() -> str:
+    """Read the API key at call time — covers keys set via UI after startup."""
+    import os
+    key = os.environ.get("OPENROUTER_API_KEY", "") or settings.OPENROUTER_API_KEY
+    if not key:
+        try:
+            from backend.services.user_service import get_active_user_id, get_api_keys
+            uid = get_active_user_id()
+            if uid:
+                key = get_api_keys(uid).get("OPENROUTER_API_KEY", "")
+        except Exception:
+            pass
+    return key
+
+
+def _get_groq_key() -> str:
+    """Read Groq API key at call time."""
+    import os
+    key = os.environ.get("GROQ_API_KEY", "") or settings.GROQ_API_KEY
+    if not key:
+        try:
+            from backend.services.user_service import get_active_user_id, get_api_keys
+            uid = get_active_user_id()
+            if uid:
+                key = get_api_keys(uid).get("GROQ_API_KEY", "")
+        except Exception:
+            pass
+    return key
+
+
+async def _call_via_groq_fallback(messages: list, max_tokens: int, expect_json: bool, purpose: str) -> Any:
+    """Call Groq API directly when OpenRouter is out of credits."""
+    key = _get_groq_key()
+    if not key:
+        raise Exception("No Groq API key available. Add one in API Keys settings.")
+
+    logger.warning(f"OpenRouter out of credits — using Groq fallback for purpose={purpose}")
+
+    payload = {
+        "model": _GROQ_FALLBACK_MODEL,
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": max_tokens,
+    }
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(_GROQ_API_URL, headers=headers, json=payload, timeout=60.0)
+
+    if response.status_code != 200:
+        raise Exception(f"Groq fallback error: {response.status_code} - {response.text}")
+
+    content = response.json()["choices"][0]["message"].get("content") or ""
+    if not content:
+        raise ValueError("Groq fallback returned empty content.")
+
+    if expect_json:
+        return _parse_json_response(content)
+    return content
 
 
 async def call_groq(
@@ -50,8 +109,21 @@ async def call_groq(
         {"role": "user", "content": user_message}
     ]
 
-    # If we don't have a live client (dev environment), return mocked responses
-    if not llm_client_available:
+    # Compute token budget before any branching so all paths can reference it
+    if purpose.startswith("score_") or purpose.startswith("gan_discriminator"):
+        max_tokens = settings.LLM_MAX_TOKENS_SCORING
+    elif purpose.startswith("suggest_roles") or purpose.startswith("synthesize_persona"):
+        max_tokens = settings.LLM_MAX_TOKENS_ROLES
+    elif "cover_letter" in purpose:
+        max_tokens = settings.LLM_MAX_TOKENS_CL
+    else:
+        max_tokens = settings.LLM_MAX_TOKENS_GENERATION
+
+    # If no OpenRouter key, try Groq directly; only mock if both are missing
+    if not _get_openrouter_key():
+        if _get_groq_key():
+            return await _call_via_groq_fallback(messages, max_tokens, expect_json, purpose)
+
         logger.info(f"Mock LLM response for purpose={purpose} (expect_json={expect_json})")
         await asyncio.sleep(0.5) # Simulate slight delay even in mock
         # Provide lightweight mocks tailored to common purposes used by the pipeline
@@ -120,29 +192,19 @@ async def call_groq(
             logger.info(f"Calling OpenRouter API (Attempt {attempt+1}/{max_retries}) | Purpose: {purpose}")
             
             headers = {
-                "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                "Authorization": f"Bearer {_get_openrouter_key()}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://jobless.io", # Required by OpenRouter
+                "HTTP-Referer": "https://jobless.io",
                 "X-Title": "jobless.io"
             }
             
-            # Cap tokens per purpose to avoid credit overuse
-            if purpose.startswith("score_") or purpose.startswith("gan_discriminator"):
-                max_tokens = settings.LLM_MAX_TOKENS_SCORING
-            elif purpose.startswith("suggest_roles") or purpose.startswith("synthesize_persona"):
-                max_tokens = settings.LLM_MAX_TOKENS_ROLES
-            else:
-                max_tokens = settings.LLM_MAX_TOKENS_GENERATION
-
             payload = {
                 "model": settings.OPENROUTER_MODEL,
                 "messages": messages,
                 "temperature": 0.7,
                 "max_tokens": max_tokens,
+                "tool_choice": "none",
             }
-
-            if expect_json and purpose != 'suggest_roles':
-                payload["response_format"] = {"type": "json_object"}
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -152,12 +214,23 @@ async def call_groq(
                     timeout=60.0
                 )
             
+            if response.status_code == 402:
+                return await _call_via_groq_fallback(messages, max_tokens, expect_json, purpose)
             if response.status_code != 200:
                 raise Exception(f"OpenRouter API error: {response.status_code} - {response.text}")
             
             data = response.json()
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            finish_reason = choice.get("finish_reason", "unknown")
+            content = choice["message"].get("content") or ""
             usage = data.get("usage", {"prompt_tokens": 0, "completion_tokens": 0})
+
+            if not content:
+                logger.error(
+                    f"Empty content from OpenRouter | purpose={purpose} | "
+                    f"finish_reason={finish_reason} | full_response={data}"
+                )
+                raise ValueError(f"LLM returned empty content (finish_reason={finish_reason}).")
 
             # Log decision
             _log_groq_decision(
@@ -191,8 +264,8 @@ async def call_groq(
                 error=str(e)
             )
 
-            # Retry logic for rate limits or server errors
-            if "rate limit" in error_msg or "429" in error_msg or "503" in error_msg or "500" in error_msg:
+            # Retry logic for rate limits, server errors, or truncated JSON responses
+            if "rate limit" in error_msg or "429" in error_msg or "503" in error_msg or "500" in error_msg or isinstance(e, ValueError):
                 if attempt < max_retries - 1:
                     sleep_time = base_delay * (2 ** attempt)
                     logger.warning(f"OpenRouter API Error: {str(e)}. Retrying in {sleep_time}s...")
@@ -208,27 +281,31 @@ async def call_groq(
 
 def _parse_json_response(content: str) -> Any:
     """Safely extract and parse JSON from response, handling markdown fences and trailing text."""
+    import re
     content = content.strip()
-    
-    # Try direct parse first
+
+    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    fence = re.match(r'^```(?:json)?\s*([\s\S]*?)\s*```$', content)
+    if fence:
+        content = fence.group(1).strip()
+
+    # Try direct parse
     try:
         return json.loads(content)
     except json.JSONDecodeError:
         pass
 
-    # Try extracting content between first { and last } or [ and ]
-    import re
-    # Find first { or [
-    match = re.search(r'(\{.*\}|\[.*\])', content, re.DOTALL)
+    # Extract first {...} or [...] block
+    match = re.search(r'(\{[\s\S]*\}|\[[\s\S]*\])', content)
     if match:
         extracted = match.group(0)
         try:
             return json.loads(extracted)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse extracted JSON. Extracted: {extracted}")
+            logger.error(f"Failed to parse extracted JSON: {extracted[:300]}")
             raise ValueError(f"Invalid JSON returned by LLM: {str(e)}")
-    
-    logger.error(f"No JSON structure found in response content: {content}")
+
+    logger.error(f"No JSON structure found in LLM response: {content[:300]}")
     raise ValueError("No valid JSON found in LLM response.")
 
 

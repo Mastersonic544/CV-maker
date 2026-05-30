@@ -6,7 +6,8 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse, FileResponse
 
 from backend.storage import json_store
-from backend.services.cv_service import research_company, run_gan_loop, render_cv_to_pdf
+from backend.services.cv_service import research_company, run_gan_loop, render_cv_to_pdf, _coerce_persona
+from backend.models.schemas import HiringPersona
 from backend.config import settings
 from backend.services.groq_service import call_groq
 
@@ -29,17 +30,38 @@ async def broadcast_status(company_id: str, message: str):
 
 
 async def _generation_workflow(company_id: str, doc_type: str):
+    logger.info(f"[{company_id}] Starting {doc_type} generation workflow")
     try:
         targets = json_store.read_targets()
         target = next((t for t in targets if t.company_id == company_id), None)
         if not target:
-            raise ValueError("Target company not found.")
+            raise ValueError(f"Target company '{company_id}' not found in targets.json")
 
         profile = json_store.read_raw_profile()
 
-        await broadcast_status(company_id, "🔍 Researching company and building HR persona...")
-        persona = await research_company(company_id, target)
+        # Reuse cached persona if meta.json already exists (avoids re-scraping for CL after CV)
+        meta_path = json_store.get_applications_dir() / company_id / "meta.json"
+        if meta_path.exists():
+            logger.info(f"[{company_id}] Reusing existing persona from meta.json")
+            await broadcast_status(company_id, "♻️ Reusing existing HR persona...")
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                persona_dict = meta.get("persona", {})
+                try:
+                    persona = HiringPersona(**persona_dict)
+                except Exception:
+                    persona = _coerce_persona(persona_dict)
+            except Exception as e:
+                logger.warning(f"[{company_id}] Could not load cached persona ({e}), re-researching")
+                await broadcast_status(company_id, "🔍 Researching company and building HR persona...")
+                persona = await research_company(company_id, target)
+        else:
+            logger.info(f"[{company_id}] No cached persona, running research")
+            await broadcast_status(company_id, "🔍 Researching company and building HR persona...")
+            persona = await research_company(company_id, target)
 
+        logger.info(f"[{company_id}] Persona ready, starting GAN loop for {doc_type}")
         await broadcast_status(company_id, "🧬 Starting GAN generation loop...")
 
         async def gan_progress_cb(msg: str):
@@ -53,6 +75,9 @@ async def _generation_workflow(company_id: str, doc_type: str):
             progress_callback=gan_progress_cb,
             company_name=target.company_name,
         )
+
+        if not gan_result.get("doc"):
+            raise ValueError(f"GAN loop returned no document for {doc_type}. LLM may have returned invalid output.")
 
         await broadcast_status(company_id, "🎨 Rendering PDF...")
         target_dir = json_store.get_applications_dir() / company_id

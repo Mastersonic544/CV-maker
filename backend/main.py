@@ -46,13 +46,20 @@ app.include_router(interview.router, prefix="/api/interview", tags=["Interview"]
 
 @app.on_event("startup")
 async def startup_event():
-    """Run migrations and other startup tasks."""
+    """Run migrations and inject active user's API keys into the environment."""
+    import os
     try:
         from backend.services import user_service
         user_service.migrate_existing_data()
-        logger.info("Startup: user data migration check complete")
+        uid = user_service.get_active_user_id()
+        if uid:
+            keys = user_service.get_api_keys(uid)
+            for k, v in keys.items():
+                if v:
+                    os.environ[k] = v
+        logger.info("Startup: migration and key injection complete")
     except Exception as exc:
-        logger.warning(f"Startup migration warning: {exc}")
+        logger.warning(f"Startup warning: {exc}")
 
 
 @app.get("/health")

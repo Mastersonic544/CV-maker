@@ -51,6 +51,7 @@ export const usersClient = {
   deleteProfileSection: (userId, section) => request(`/users/${userId}/profile-json/section`, { method: "DELETE", body: JSON.stringify({ section }) }),
   aiFillProfile: (userId) => request(`/users/${userId}/profile-json/ai-fill`, { method: "POST" }),
   approveAiFields: (userId, field = null) => request(`/users/${userId}/profile-json/approve`, { method: "POST", body: JSON.stringify(field ? { field } : {}) }),
+  enrichProfile: (userId, dumpText) => request(`/users/${userId}/enrich`, { method: "POST", body: JSON.stringify({ dump_text: dumpText }) }),
 };
 
 export const apiClient = {
@@ -65,6 +66,8 @@ export const apiClient = {
   getTargets: () => request("/discovery/targets"),
   finalizeTargets: (ids) => request("/discovery/targets/finalize", { method: "POST", body: JSON.stringify({ ids }) }),
   addManualTarget: (data) => request("/discovery/targets/manual", { method: "POST", body: JSON.stringify(data) }),
+  importJsonTargets: (jsonData) => request("/discovery/targets/import-json", { method: "POST", body: JSON.stringify({ json_data: jsonData }) }),
+  updateTarget: (companyId, data) => request(`/discovery/targets/${companyId}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteTarget: (companyId) => request(`/discovery/targets/${companyId}`, { method: "DELETE" }),
 
   // Generation
@@ -86,6 +89,13 @@ export const apiClient = {
   // Apply
   getApplyStatus: () => request("/apply/status"),
   applyToCompany: (companyId) => request(`/apply/run/${companyId}`, { method: "POST" }),
+  getEmailPreview: (companyId) => request(`/apply/email-preview/${companyId}`),
+  updateTargetEmail: (companyId, hrEmail) =>
+    request(`/apply/targets/${companyId}/email`, { method: "PATCH", body: JSON.stringify({ hr_email: hrEmail }) }),
+  fetchHrEmail: (companyId) => request(`/apply/fetch-email/${companyId}`),
+  skipAndBlacklist: (companyId) => request(`/apply/targets/${companyId}/skip`, { method: "DELETE" }),
+  generateEmail: (companyId) => request(`/apply/email-content/${companyId}/generate`, { method: "POST" }),
+  saveEmail: (companyId, subject, body) => request(`/apply/email-content/${companyId}`, { method: "PATCH", body: JSON.stringify({ subject, body }) }),
 
   // History
   getHistory: () => request("/history/"),

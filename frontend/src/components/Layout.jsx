@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -23,7 +23,7 @@ function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
 
-const SidebarItem = ({ to, icon: Icon, label, active, hotkey }) => (
+const SidebarItem = ({ to, icon: Icon, label, active }) => (
   <Link
     to={to}
     className={cn(
@@ -46,18 +46,6 @@ const SidebarItem = ({ to, icon: Icon, label, active, hotkey }) => (
     >
       {label}
     </span>
-    {hotkey && (
-      <span
-        className="ml-auto font-dm"
-        style={{
-          fontSize: '0.55rem',
-          letterSpacing: '0.18em',
-          color: active ? 'rgba(var(--cv-text-rgb), 0.55)' : 'rgba(var(--cv-text-rgb), 0.22)',
-        }}
-      >
-        {hotkey}
-      </span>
-    )}
   </Link>
 );
 
@@ -75,26 +63,12 @@ const Layout = ({ children }) => {
   const { theme, toggleTheme } = useTheme();
   const { lang, setLang, t } = useI18n();
 
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
-      const key = e.key.toLowerCase();
-      if (key === 'd') navigate('/discover');
-      if (key === 'r') navigate('/review');
-      if (key === 'a') navigate('/apply');
-      if (key === 'i') navigate('/interview');
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [navigate]);
-
   const navItems = [
-    { to: "/dashboard", icon: LayoutDashboard, labelKey: "nav_dashboard", hotkey: "" },
-    { to: "/discover",  icon: Search,          labelKey: "nav_discovery", hotkey: "D" },
-    { to: "/review",    icon: CheckSquare,     labelKey: "nav_review",    hotkey: "R" },
-    { to: "/apply",     icon: Send,            labelKey: "nav_apply",     hotkey: "A" },
-    { to: "/interview", icon: MessageSquare,   labelKey: "nav_interview", hotkey: "I" },
+    { to: "/dashboard", icon: LayoutDashboard, labelKey: "nav_dashboard" },
+    { to: "/discover",  icon: Search,          labelKey: "nav_discovery" },
+    { to: "/review",    icon: CheckSquare,     labelKey: "nav_review"    },
+    { to: "/apply",     icon: Send,            labelKey: "nav_apply"     },
+    { to: "/interview", icon: MessageSquare,   labelKey: "nav_interview" },
   ];
 
   return (
@@ -149,7 +123,6 @@ const Layout = ({ children }) => {
               to={item.to}
               icon={item.icon}
               label={t(item.labelKey)}
-              hotkey={item.hotkey}
               active={location.pathname === item.to || (item.to !== "/" && location.pathname.startsWith(item.to))}
             />
           ))}
