@@ -26,6 +26,8 @@ data/master.key
 # interview sessions, encrypted keys, etc. Only the placeholder is tracked.
 data/*
 !data/.gitkeep
+# Legacy single-user profile at repo root
+/profile.json
 
 # ── Internal / planning docs (kept local, not published) ──
 CLAUDE.md
