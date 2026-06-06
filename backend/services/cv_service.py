@@ -460,16 +460,27 @@ _RESUME_TEMPLATE = r"""<!DOCTYPE html>
     border-bottom: 1px solid #000;
     padding-bottom: 1px;
     margin: 11px 0 5px;
+    /* Never strand a section heading at the bottom of a page */
+    page-break-after: avoid;
+    break-after: avoid;
   }
-  .entry { margin-bottom: 7px; }
-  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-  .left-bold { font-weight: 700; }
-  .right { font-weight: 700; white-space: nowrap; }
-  .left-italic { font-style: italic; }
-  .right-italic { font-style: italic; white-space: nowrap; }
+  .entry {
+    margin-bottom: 7px;
+    /* Keep a whole entry together — title + dates + bullets move to the next page as a block.
+       NOTE: rows below use float (not flex) — Chromium's print engine ignores
+       break-inside:avoid on blocks that contain flex containers. */
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .row { overflow: hidden; }
+  .row::after { content: ""; display: table; clear: both; }
+  .left-bold { font-weight: 700; float: left; max-width: 68%; }
+  .right { font-weight: 700; white-space: nowrap; float: right; text-align: right; }
+  .left-italic { font-style: italic; float: left; max-width: 68%; }
+  .right-italic { font-style: italic; white-space: nowrap; float: right; text-align: right; }
   ul { margin: 2px 0 0 18px; }
-  li { margin-bottom: 1.5px; }
-  .skills-line { margin-bottom: 2px; }
+  li { margin-bottom: 1.5px; page-break-inside: avoid; break-inside: avoid; }
+  .skills-line { margin-bottom: 2px; page-break-inside: avoid; break-inside: avoid; }
   .skills-line .cat { font-weight: 700; }
   .note { font-style: italic; }
 </style>
