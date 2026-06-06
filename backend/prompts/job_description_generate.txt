@@ -1,0 +1,26 @@
+You are a senior technical recruiter. Given only a role/job title, write a realistic, industry-standard job description for that role as a typical strong employer would post it.
+
+## Rules
+- Base it on common, real-world expectations for this exact title — do NOT invent an unusual or niche company.
+- Be specific to the role's actual domain. A "Video Editor" posting must talk about editing software, pacing, and storytelling — NOT software engineering. A "Backend Engineer" posting must talk about APIs, databases, and systems — NOT graphic design.
+- Keep it concise but complete: about 200–300 words.
+- Use a neutral, professional tone. No company name needed — write it generically ("We are looking for...").
+
+## Required Structure (plain text, use these headings)
+Role Summary:
+<2–3 sentences describing the role and its purpose>
+
+Key Responsibilities:
+- <5–7 bullet points of concrete day-to-day responsibilities>
+
+Required Skills & Qualifications:
+- <5–7 bullet points of must-have skills, tools, and experience>
+
+Nice to Have:
+- <2–4 bullet points of bonus qualifications>
+
+## Output
+Return ONLY the job description as plain text following the structure above. No preamble, no markdown fences, no explanation.
+
+## Role Title
+{job_title}

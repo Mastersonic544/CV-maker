@@ -22,8 +22,9 @@ const CVPreview = ({ companyId, score = null, docType = "cv", onRegenerate }) =>
     }
   };
 
-  const pdfUrl = `${BASE_URL}/generation/${docType === "cv" ? "cv" : "cover-letter"}/${companyId}?t=${timestamp}`;
-  const label = docType === 'cv' ? 'Resume' : 'Cover Letter';
+  const pdfPath = docType === "cv" ? "cv" : docType === "resume" ? "resume" : "cover-letter";
+  const pdfUrl = `${BASE_URL}/generation/${pdfPath}/${companyId}?t=${timestamp}`;
+  const label = docType === 'cover_letter' ? 'Cover Letter' : 'Resume';
 
   const getScoreColor = (s) => {
     if (s >= 9.0) return "bg-emerald-500/20 text-emerald-400 border-emerald-500/50";

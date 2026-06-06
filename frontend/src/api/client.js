@@ -79,6 +79,21 @@ export const apiClient = {
   getCLJson: (companyId) => request(`/generation/cover-letter/json/${companyId}`),
   updateCLJson: (companyId, data) => request(`/generation/cover-letter/${companyId}`, { method: "PATCH", body: JSON.stringify(data) }),
   getApplicationMeta: (companyId) => request(`/generation/meta/${companyId}`),
+
+  // Quick CV — generate a tailored CV straight from a pasted job description
+  quickGenerateCV: (jobTitle, jobDescription) =>
+    request("/generation/quick/generate", {
+      method: "POST",
+      body: JSON.stringify({ job_title: jobTitle, job_description: jobDescription }),
+    }),
+  listQuickCVs: () => request("/generation/quick/list"),
+  deleteQuickCV: (companyId) => request(`/generation/quick/${companyId}`, { method: "DELETE" }),
+  reorderQuickCVs: (orderedIds) =>
+    request("/generation/quick/reorder", { method: "POST", body: JSON.stringify({ ordered_ids: orderedIds }) }),
+
+  // Harvard resume — generated straight from the profile (no job description)
+  quickGenerateResume: () => request("/generation/resume/generate", { method: "POST" }),
+
   getGANIterations: (companyId) => request(`/generation/iterations/${companyId}`),
   explainInsight: (companyId, insightType, insightValue) =>
     request(`/generation/explain/${companyId}`, {

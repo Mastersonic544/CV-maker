@@ -1,12 +1,17 @@
 import asyncio
 import json
 import logging
+import shutil
+import time
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse, FileResponse
 
 from backend.storage import json_store
-from backend.services.cv_service import research_company, run_gan_loop, render_cv_to_pdf, _coerce_persona
+from backend.services.cv_service import (
+    research_company, run_gan_loop, render_cv_to_pdf, _coerce_persona,
+    build_persona_from_description, build_resume_from_profile,
+)
 from backend.models.schemas import HiringPersona
 from backend.config import settings
 from backend.services.groq_service import call_groq
@@ -89,6 +94,209 @@ async def _generation_workflow(company_id: str, doc_type: str):
     except Exception as e:
         logger.error(f"Generation workflow failed for {company_id}: {e}", exc_info=True)
         await broadcast_status(company_id, f"ERROR|{str(e)}")
+
+
+# ── Quick CV (job-description-only, no scraping) ─────────────────────────────
+
+async def _quick_generation_workflow(company_id: str, job_title: str, job_description: str):
+    logger.info(f"[{company_id}] Starting quick CV generation for '{job_title}'")
+    try:
+        profile = json_store.read_raw_profile()
+
+        if job_description.strip():
+            await broadcast_status(company_id, "🔍 Analyzing job description...")
+        else:
+            await broadcast_status(company_id, "✍️ Drafting an ideal job description for this role...")
+        persona = await build_persona_from_description(company_id, job_title, job_description)
+
+        await broadcast_status(company_id, "🧬 Starting GAN generation loop...")
+
+        async def gan_progress_cb(msg: str):
+            await broadcast_status(company_id, msg)
+
+        gan_result = await run_gan_loop(
+            company_id=company_id,
+            profile=profile,
+            persona=persona,
+            doc_type="cv",
+            progress_callback=gan_progress_cb,
+            company_name=job_title,
+        )
+
+        if not gan_result.get("doc"):
+            raise ValueError("GAN loop returned no document. LLM may have returned invalid output.")
+
+        await broadcast_status(company_id, "🎨 Rendering PDF...")
+        target_dir = json_store.get_applications_dir() / company_id
+        pdf_path = target_dir / "cv.pdf"
+        await render_cv_to_pdf(gan_result["doc"], str(pdf_path), doc_type="cv")
+
+        # Persist the achieved score into meta.json so the saved list can show it
+        meta_path = target_dir / "meta.json"
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            meta["cv_score"] = gan_result["score"]
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+        except Exception as e:
+            logger.warning(f"[{company_id}] Could not write score to meta.json: {e}")
+
+        await broadcast_status(company_id, f"DONE|{gan_result['score']}")
+
+    except Exception as e:
+        logger.error(f"Quick generation failed for {company_id}: {e}", exc_info=True)
+        await broadcast_status(company_id, f"ERROR|{str(e)}")
+
+
+# ── Harvard Resume (profile-based, no job, no LLM) ──────────────────────────
+
+async def _resume_generation_workflow(company_id: str):
+    logger.info(f"[{company_id}] Starting Harvard resume generation")
+    try:
+        profile = json_store.read_raw_profile()
+
+        await broadcast_status(company_id, "📄 Building Harvard-format resume from your profile...")
+        resume_json = build_resume_from_profile(profile)
+
+        target_dir = json_store.get_applications_dir() / company_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        with open(target_dir / "resume.json", "w", encoding="utf-8") as f:
+            json.dump(resume_json, f, indent=2)
+
+        # meta.json keeps it listable alongside Quick CVs (kind distinguishes them)
+        meta_content = {
+            "company_id": company_id,
+            "quick": True,
+            "kind": "resume",
+            "job_title": "Harvard Resume",
+            "scraped_on": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        with open(target_dir / "meta.json", "w", encoding="utf-8") as f:
+            json.dump(meta_content, f, indent=2)
+
+        await broadcast_status(company_id, "🎨 Rendering PDF...")
+        pdf_path = target_dir / "resume.pdf"
+        await render_cv_to_pdf(resume_json, str(pdf_path), doc_type="resume")
+
+        await broadcast_status(company_id, "DONE|0")
+
+    except Exception as e:
+        logger.error(f"Resume generation failed for {company_id}: {e}", exc_info=True)
+        await broadcast_status(company_id, f"ERROR|{str(e)}")
+
+
+@router.post("/resume/generate")
+async def resume_generate(background_tasks: BackgroundTasks):
+    """Generate a Harvard-format resume straight from the active user's profile."""
+    company_id = f"quick_{int(time.time() * 1000)}"
+    _status_queues[company_id] = asyncio.Queue()
+    background_tasks.add_task(_resume_generation_workflow, company_id)
+    return {"status": "started", "company_id": company_id, "job_title": "Harvard Resume"}
+
+
+@router.get("/resume/{company_id}")
+async def get_resume_pdf(company_id: str):
+    pdf_path = json_store.get_applications_dir() / company_id / "resume.pdf"
+    return _get_pdf_response(pdf_path, f"Resume_{company_id}.pdf")
+
+
+@router.get("/resume/json/{company_id}")
+async def get_resume_json(company_id: str):
+    json_path = json_store.get_applications_dir() / company_id / "resume.json"
+    if not json_path.exists():
+        raise HTTPException(status_code=404, detail="Resume JSON not found.")
+    with open(json_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@router.post("/quick/generate")
+async def quick_generate(body: dict, background_tasks: BackgroundTasks):
+    """Generate a tailored CV straight from a pasted job description.
+
+    No company, no scraping, no targets.json entry. Returns a company_id the
+    frontend uses to stream progress (/status) and fetch the PDF (/cv).
+    """
+    job_title = (body.get("job_title") or "").strip()
+    job_description = (body.get("job_description") or "").strip()
+    if not job_title:
+        raise HTTPException(status_code=400, detail="job_title is required.")
+
+    company_id = f"quick_{int(time.time() * 1000)}"
+    _status_queues[company_id] = asyncio.Queue()
+    background_tasks.add_task(_quick_generation_workflow, company_id, job_title, job_description)
+    return {"status": "started", "company_id": company_id, "job_title": job_title}
+
+
+@router.get("/quick/list")
+async def quick_list():
+    """List previously generated quick CVs (most recent first)."""
+    apps_dir = json_store.get_applications_dir()
+    results = []
+    if apps_dir.exists():
+        for d in apps_dir.iterdir():
+            if not d.is_dir():
+                continue
+            meta_path = d / "meta.json"
+            if not meta_path.exists():
+                continue
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+            except Exception:
+                continue
+            if not meta.get("quick"):
+                continue
+            kind = meta.get("kind", "cv")
+            pdf_file = "resume.pdf" if kind == "resume" else "cv.pdf"
+            doc_pdf = d / pdf_file
+            results.append({
+                "company_id": meta.get("company_id", d.name),
+                "kind": kind,
+                "job_title": meta.get("job_title")
+                    or (meta.get("company_info") or {}).get("job_title", "Tailored Role"),
+                "score": meta.get("cv_score"),
+                "created_on": meta.get("scraped_on"),
+                "has_cv": doc_pdf.exists() and doc_pdf.stat().st_size > 0,
+            })
+    # Newest first by default; manual order (if set) takes precedence (stable sort)
+    results.sort(key=lambda r: r.get("created_on") or "", reverse=True)
+    results.sort(key=lambda r: r.get("order") if r.get("order") is not None else -1)
+    return results
+
+
+@router.post("/quick/reorder")
+async def quick_reorder(body: dict):
+    """Persist a manual ordering of saved Quick CVs / resumes.
+
+    Body: {"ordered_ids": ["quick_...", ...]} — index in the list becomes the order.
+    """
+    ordered_ids = body.get("ordered_ids") or []
+    apps_dir = json_store.get_applications_dir()
+    for idx, company_id in enumerate(ordered_ids):
+        meta_path = apps_dir / company_id / "meta.json"
+        if not meta_path.exists():
+            continue
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            meta["order"] = idx
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Could not set order for {company_id}: {e}")
+    return {"status": "reordered", "count": len(ordered_ids)}
+
+
+@router.delete("/quick/{company_id}")
+async def quick_delete(company_id: str):
+    """Delete a saved quick CV and its generated files."""
+    d = json_store.get_applications_dir() / company_id
+    if d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+    _status_queues.pop(company_id, None)
+    return {"status": "deleted", "company_id": company_id}
 
 
 # ── Trigger endpoints ──────────────────────────────────────────────────────

@@ -429,6 +429,128 @@ _CL_TEMPLATE = r"""<!DOCTYPE html>
 
 
 # ---------------------------------------------------------------------------
+# Harvard Resume HTML Template (single-column, classic black-and-white)
+# ---------------------------------------------------------------------------
+
+_RESUME_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page { size: A4; margin: 1.5cm 1.8cm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 10.5pt;
+    line-height: 1.32;
+    color: #000;
+    background: #fff;
+  }
+  .name {
+    text-align: center;
+    font-size: 19pt;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .contact { text-align: center; font-size: 9.5pt; margin-bottom: 12px; }
+  .section-title {
+    font-size: 11pt;
+    font-weight: 700;
+    border-bottom: 1px solid #000;
+    padding-bottom: 1px;
+    margin: 11px 0 5px;
+  }
+  .entry { margin-bottom: 7px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .left-bold { font-weight: 700; }
+  .right { font-weight: 700; white-space: nowrap; }
+  .left-italic { font-style: italic; }
+  .right-italic { font-style: italic; white-space: nowrap; }
+  ul { margin: 2px 0 0 18px; }
+  li { margin-bottom: 1.5px; }
+  .skills-line { margin-bottom: 2px; }
+  .skills-line .cat { font-weight: 700; }
+  .note { font-style: italic; }
+</style>
+</head>
+<body>
+
+<div class="name">{{ r.header.name | default('') }}</div>
+<div class="contact">
+  {% if r.header.address %}{{ r.header.address }} &bull; {% endif %}
+  {% if r.header.email %}{{ r.header.email }}{% endif %}
+  {% if r.header.phone %} &bull; {{ r.header.phone }}{% endif %}
+  {% for l in (r.header.links | default([])) %} &bull; {{ l }}{% endfor %}
+</div>
+
+{% if r.education %}
+<div class="section-title">Education</div>
+{% for e in r.education %}
+<div class="entry">
+  <div class="row">
+    <span class="left-bold">{{ e.institution | default('') }}</span>
+    <span class="right">{{ e.location | default('') }}</span>
+  </div>
+  <div class="row">
+    <span class="left-italic">{{ e.degree | default('') }}{% if e.gpa %}. GPA {{ e.gpa }}{% endif %}</span>
+    <span class="right-italic">{{ e.graduation_date | default('') }}</span>
+  </div>
+  {% if e.notes %}<div class="note">{{ e.notes }}</div>{% endif %}
+  {% if e.coursework %}<div>Relevant Coursework: {{ e.coursework }}</div>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+{% if r.experience %}
+<div class="section-title">Experience</div>
+{% for x in r.experience %}
+<div class="entry">
+  <div class="row">
+    <span class="left-bold">{{ x.organization | default('') }}</span>
+    <span class="right">{{ x.location | default('') }}</span>
+  </div>
+  <div class="row">
+    <span class="left-italic">{{ x.title | default('') }}</span>
+    <span class="right-italic">{{ x.dates | default('') }}</span>
+  </div>
+  {% if x.bullets %}<ul>{% for b in x.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+{% if r.leadership %}
+<div class="section-title">Leadership &amp; Activities</div>
+{% for a in r.leadership %}
+<div class="entry">
+  <div class="row">
+    <span class="left-bold">{{ a.organization | default('') }}</span>
+    <span class="right">{{ a.location | default('') }}</span>
+  </div>
+  {% if a.role or a.dates %}
+  <div class="row">
+    <span class="left-italic">{{ a.role | default('') }}</span>
+    <span class="right-italic">{{ a.dates | default('') }}</span>
+  </div>
+  {% endif %}
+  {% if a.bullets %}<ul>{% for b in a.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+{% if r.skills %}
+<div class="section-title">Skills &amp; Interests</div>
+{% if r.skills.technical %}<div class="skills-line"><span class="cat">Technical:</span> {{ r.skills.technical }}</div>{% endif %}
+{% if r.skills.language %}<div class="skills-line"><span class="cat">Language:</span> {{ r.skills.language }}</div>{% endif %}
+{% if r.skills.laboratory %}<div class="skills-line"><span class="cat">Laboratory:</span> {{ r.skills.laboratory }}</div>{% endif %}
+{% if r.skills.interests %}<div class="skills-line"><span class="cat">Interests:</span> {{ r.skills.interests }}</div>{% endif %}
+{% endif %}
+
+</body>
+</html>"""
+
+
+# ---------------------------------------------------------------------------
 # Profile slimmer — strips metadata/noise before sending to LLM
 # ---------------------------------------------------------------------------
 
@@ -536,6 +658,143 @@ def _slim_profile(profile: dict) -> dict:
         ],
         "target_roles":   (profile.get("preferences_and_goals") or {}).get("target_roles", [])[:4],
         "strengths":      (profile.get("personality_and_work_style") or {}).get("strengths", [])[:5],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Harvard Resume builder — maps profile data directly into the Harvard blueprint
+# ---------------------------------------------------------------------------
+
+_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _fmt_month(d) -> str:
+    """Format a profile date ('2025-04', '2024', 'present') as 'Apr 2025'."""
+    import re
+    if not d:
+        return ""
+    s = str(d).strip()
+    if s.lower() in ("present", "current", "now"):
+        return "Present"
+    m = re.match(r"^(\d{4})-(\d{1,2})", s)
+    if m:
+        year, mo = m.group(1), int(m.group(2))
+        return f"{_MONTHS[mo - 1]} {year}" if 1 <= mo <= 12 else year
+    if re.match(r"^\d{4}$", s):
+        return s
+    return s
+
+
+def build_resume_from_profile(profile: dict) -> dict:
+    """Build a Harvard-format resume JSON straight from the candidate's profile.
+
+    Deterministic — no LLM, no job description. Uses only data that exists in the
+    profile so nothing is fabricated.
+    """
+    pi = profile.get("personal_info", {}) or {}
+    contact = pi.get("contact", {}) or {}
+    loc = pi.get("location", {}) or {}
+
+    # ── Header ──
+    city_country = ", ".join(p for p in (loc.get("city"), loc.get("country")) if p)
+    links = []
+    if contact.get("portfolio"):
+        links.append(contact["portfolio"])
+    if contact.get("linkedin"):
+        links.append(contact["linkedin"].replace("https://", "").replace("http://", ""))
+    header = {
+        "name": pi.get("full_name") or "",
+        "address": city_country,
+        "email": contact.get("email") or "",
+        "phone": contact.get("phone") or "",
+        "links": links[:2],
+    }
+
+    # ── Education ──
+    education = []
+    for e in (profile.get("education") or []):
+        deg = (e.get("degree") or "").strip()
+        field = (e.get("field") or "").strip()
+        if deg and field and field.lower() not in deg.lower():
+            degree_line = f"{deg}, {field}"
+        else:
+            degree_line = deg or field
+        education.append({
+            "institution": e.get("institution") or "",
+            "location": "",
+            "degree": degree_line,
+            "gpa": e.get("grade") or e.get("gpa") or "",
+            "graduation_date": _fmt_month(e.get("end_date")),
+            "notes": "",
+            "coursework": "",
+        })
+
+    # ── Experience ──
+    raw_exp = profile.get("work_experience") or profile.get("experience") or []
+    experience = []
+    for x in raw_exp:
+        bullets = list(x.get("responsibilities") or []) + list(x.get("achievements") or [])
+        if not bullets:
+            bullets = list(x.get("bullet_points") or [])
+        seen, deduped = set(), []
+        for b in bullets:
+            if b and b not in seen:
+                seen.add(b)
+                deduped.append(b)
+        start = _fmt_month(x.get("start_date"))
+        end = "Present" if x.get("is_current") else _fmt_month(x.get("end_date"))
+        dates = " – ".join(d for d in (start, end) if d)
+        experience.append({
+            "organization": x.get("company") or x.get("organization") or "",
+            "location": x.get("location") or "",
+            "title": x.get("title") or x.get("role") or "",
+            "dates": dates,
+            "bullets": deduped[:5],
+        })
+
+    # ── Leadership & Activities (derived from projects — no dedicated profile field) ──
+    leadership = []
+    for p in (profile.get("projects") or [])[:4]:
+        bl = [b for b in (p.get("description"), p.get("outcome")) if b]
+        leadership.append({
+            "organization": p.get("name") or "",
+            "location": "",
+            "role": "Project",
+            "dates": "",
+            "bullets": bl[:2],
+        })
+
+    # ── Skills & Interests ──
+    sk = profile.get("skills") or {}
+    technical = []
+    if isinstance(sk, dict):
+        for key in ("technical", "tools", "frameworks"):
+            for item in (sk.get(key) or []):
+                technical.append(item if isinstance(item, str) else item.get("name", ""))
+    elif isinstance(sk, list):
+        technical = [s if isinstance(s, str) else s.get("name", "") for s in sk]
+    seen, tech = set(), []
+    for t in technical:
+        if t and t not in seen:
+            seen.add(t)
+            tech.append(t)
+    lang_str = ", ".join(
+        f"{l.get('language', '')} ({str(l.get('proficiency', '')).capitalize()})"
+        for l in (pi.get("languages") or []) if l.get("language")
+    )
+    skills = {
+        "technical": ", ".join(tech[:28]),
+        "language": lang_str,
+        "laboratory": "",
+        "interests": "",
+    }
+
+    return {
+        "header": header,
+        "education": education,
+        "experience": experience,
+        "leadership": leadership,
+        "skills": skills,
     }
 
 
@@ -651,6 +910,108 @@ async def research_company(company_id: str, target: TargetCompany) -> HiringPers
     return persona
 
 
+async def generate_job_description(job_title: str) -> str:
+    """Draft a realistic, industry-standard job description from a role title alone.
+
+    Used by the Quick CV flow when the user leaves the description blank — a synthetic
+    posting gives the persona builder and GAN loop real signal instead of nothing.
+    """
+    logger.info(f"Generating synthetic job description for '{job_title}'")
+    prompt_path = settings.BASE_DIR / "backend" / "prompts" / "job_description_generate.txt"
+    with open(prompt_path, "r", encoding="utf-8") as f:
+        prompt_template = f.read()
+    system_prompt = prompt_template.replace("{job_title}", job_title)
+
+    try:
+        result = await call_groq(
+            system_prompt=system_prompt,
+            user_message=f"Write the job description for the role: {job_title}",
+            expect_json=False,
+            purpose="generate_job_description",
+        )
+        return (result or "").strip()
+    except Exception as exc:
+        logger.warning(f"Job description generation failed ({exc}); proceeding without one")
+        return ""
+
+
+async def build_persona_from_description(
+    company_id: str,
+    job_title: str,
+    job_description: str,
+    company_name: str = "Target Role",
+) -> HiringPersona:
+    """Synthesize a HiringPersona directly from a pasted job description.
+
+    Used by the Dashboard "Quick CV" flow — no company scraping, no targets.json
+    entry. Persists a meta.json marked with `quick: True` so it can be listed and
+    re-used (the GAN loop and explain endpoints read the same meta).
+
+    If no description is provided, the AI drafts a realistic one from the title
+    for sharper, more relevant tailoring.
+    """
+    logger.info(f"Building quick persona for {company_id} ({job_title})")
+
+    if not (job_description or "").strip():
+        job_description = await generate_job_description(job_title)
+
+    context = (
+        f"Company: {company_name}\n"
+        f"Role: {job_title}\n\n"
+        f"Job Posting Content:\n{job_description or '(not available)'}"
+    )
+
+    prompt_path = settings.BASE_DIR / "backend" / "prompts" / "persona_build.txt"
+    with open(prompt_path, "r", encoding="utf-8") as f:
+        prompt_template = f.read()
+    system_prompt = prompt_template.replace("{job_posting_text}", context)
+
+    persona_dict = await call_groq(
+        system_prompt=system_prompt,
+        user_message="Build the hiring persona for this job posting.",
+        expect_json=True,
+        purpose="synthesize_persona",
+    )
+
+    raw_persona = persona_dict
+    try:
+        persona = HiringPersona(**persona_dict)
+    except ValidationError:
+        logger.warning("HiringPersona validation failed, coercing.")
+        persona = _coerce_persona(persona_dict)
+
+    # Synthetic target keeps meta.json schema-consistent with the scraped flow
+    target = TargetCompany(
+        company_id=company_id,
+        company_name=company_name,
+        job_title=job_title,
+        job_url="",
+        job_description=job_description,
+        apply_type="email",
+        location="",
+    )
+
+    target_dir = json_store.get_applications_dir() / company_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = target_dir / "meta.json"
+    meta_content = {
+        "company_id": company_id,
+        "company_info": target.model_dump(mode="json"),
+        "persona": persona.model_dump(mode="json"),
+        "raw_persona_output": raw_persona,
+        "scraped_data": {"job_posting_text": job_description},
+        "scraped_on": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "quick": True,
+        "job_title": job_title,
+    }
+    tmp = meta_path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(meta_content, f, indent=2)
+    tmp.replace(meta_path)
+
+    return persona
+
+
 def _clean_cover_letter(doc: dict) -> dict:
     """Strip em-dashes and en-dashes from cover letter text as a post-processing safety net."""
     if not doc or not isinstance(doc, dict):
@@ -667,6 +1028,69 @@ def _clean_cover_letter(doc: dict) -> dict:
             if isinstance(p, str) else p
             for p in paragraphs
         ]
+    return doc
+
+
+# Tokens that signal a software/engineering role. Used to decide whether the
+# GitHub link belongs on the CV — for design, video, marketing, etc. it doesn't.
+_TECH_ROLE_SIGNALS = (
+    "developer", "engineer", "software", "frontend", "front-end", "backend",
+    "back-end", "full stack", "fullstack", "full-stack", "programmer", "devops",
+    "data ", "machine learning", " ml", " ai", "cloud", "web ", "mobile", " qa",
+    "automation", "api", "sre", "architect", "coding", "programming",
+    "python", "javascript", "typescript", "react", "node", "tech",
+)
+
+
+def _coerce_text(val) -> str:
+    """Flatten a value the LLM may have nested (e.g. summary as {"text": "..."}) into a plain string."""
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, dict):
+        for key in ("text", "summary", "value", "content"):
+            if isinstance(val.get(key), str):
+                return val[key]
+        return " ".join(v for v in val.values() if isinstance(v, str))
+    if isinstance(val, list):
+        return " ".join(_coerce_text(v) for v in val)
+    return str(val)
+
+
+def _role_is_technical(persona: HiringPersona, company_name: str, doc: dict) -> bool:
+    """Heuristic: does the target role involve software development?"""
+    blob = " ".join([
+        company_name or "",
+        " ".join(persona.what_they_look_for or []),
+        " ".join(persona.cultural_keywords or []),
+        " ".join(s for s in (doc.get("skills") or []) if isinstance(s, str)),
+    ]).lower()
+    return any(sig in blob for sig in _TECH_ROLE_SIGNALS)
+
+
+def _normalize_cv_doc(doc: dict, persona: HiringPersona, company_name: str) -> dict:
+    """Repair LLM output before save/render: flatten nested text fields and drop
+    irrelevant links (e.g. GitHub on a non-technical CV)."""
+    if not doc or not isinstance(doc, dict):
+        return doc
+
+    # 1. Flatten summary if the model nested it as a dict/list
+    doc["summary"] = _coerce_text(doc.get("summary"))
+
+    header = doc.get("header")
+    if isinstance(header, dict):
+        # Headline can also come back nested occasionally
+        header["headline"] = _coerce_text(header.get("headline"))
+
+        # 2. Curate links: keep strings only; strip GitHub for non-technical roles
+        links = header.get("links")
+        if isinstance(links, list):
+            clean = [l for l in links if isinstance(l, str) and l.strip()]
+            if not _role_is_technical(persona, company_name, doc):
+                clean = [l for l in clean if "github" not in l.lower()]
+            header["links"] = clean
+
     return doc
 
 
@@ -844,6 +1268,10 @@ async def run_gan_loop(
                 f"🔄 Score {score}/10 — refining: {notes[0] if notes else 'improving quality'}..."
             )
 
+    # Normalize CV: flatten nested text fields (summary), curate links (drop GitHub on non-tech roles)
+    if doc_type == "cv" and best_doc:
+        best_doc = _normalize_cv_doc(best_doc, persona, company_name)
+
     # Humanize cover letter: strip em-dashes as a safety net on top of prompt rules
     if doc_type == "cover_letter" and best_doc:
         best_doc = _clean_cover_letter(best_doc)
@@ -974,9 +1402,14 @@ async def render_cv_to_pdf(cv_json: dict, output_path: str, doc_type: str = "cv"
     initial = name[0].upper() if name else "Z"
 
     env = Environment(loader=BaseLoader(), autoescape=False)
-    template_html = _CV_TEMPLATE if doc_type == "cv" else _CL_TEMPLATE
+    if doc_type == "cv":
+        template_html = _CV_TEMPLATE
+    elif doc_type == "resume":
+        template_html = _RESUME_TEMPLATE
+    else:
+        template_html = _CL_TEMPLATE
     template = env.from_string(template_html)
-    rendered_html = template.render(cv=cv_json, profile_pic=profile_pic, initial=initial)
+    rendered_html = template.render(cv=cv_json, r=cv_json, profile_pic=profile_pic, initial=initial)
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _render_pdf_sync, rendered_html, output_path)

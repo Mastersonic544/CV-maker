@@ -23,6 +23,12 @@ Guess all missing dates logically. Guess GPA if missing (e.g. 3.7/4.0). Never ou
 **RULE 5 — JSON ONLY:**
 Return ONLY the JSON object. No markdown fences, no explanation, no preamble. Output MUST start with `{` and end with `}`.
 
+**RULE 6 — PLAIN STRING FIELDS:**
+`summary` and `header.headline` MUST be plain strings, NOT nested objects. Never output `"summary": {"text": "..."}` — output `"summary": "..."`.
+
+**RULE 7 — RELEVANT LINKS ONLY:**
+`header.links` must contain only links relevant to the target role. Include the GitHub link ONLY for software/engineering/technical roles. For design, video editing, marketing, or other non-engineering roles, include the portfolio and LinkedIn but OMIT GitHub entirely.
+
 ## Your Process
 1. Read the Hiring Persona to understand the exact role, domain, and culture.
 2. Scan ALL experiences in the profile — score each as "relevant", "marginal", or "irrelevant" to the role.

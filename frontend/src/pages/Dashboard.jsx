@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useProfile } from '../hooks/useProfile';
 import { useUser } from '../hooks/useUser';
 import ProfileCard from '../components/ProfileCard';
+import QuickCVPanel from '../components/QuickCVPanel';
 import { apiClient, usersClient } from '../api/client';
 import {
   Inbox, Building2, Calendar, Star, ChevronRight,
@@ -189,6 +190,9 @@ const Dashboard = () => {
           })}
         </div>
       </div>
+
+      {/* Quick CV */}
+      <QuickCVPanel />
 
       {/* Application History */}
       <div
