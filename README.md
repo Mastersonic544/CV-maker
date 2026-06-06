@@ -13,6 +13,8 @@ Everything runs on your machine. All state is stored as local JSON files — **t
 - **Role discovery** — the LLM reads your profile and suggests target roles, then real LinkedIn listings are scraped via Playwright.
 - **Hiring-persona research** — each job posting is analyzed to synthesize the HR persona you're really writing for.
 - **GAN-style CV/cover-letter generation** — a Generator LLM and a Discriminator LLM (role-playing as HR) iterate until the document scores above a quality threshold, then render to PDF.
+- **Quick CV** — generate a tailored CV straight from the Dashboard with just a role title (and optional job description) — no scraping, no targets, no Discovery round-trip. Leave the description blank and the AI auto-drafts an ideal, domain-correct posting from the title for sharper tailoring. Saved Quick CVs can be previewed, reordered (up/down), and deleted inline.
+- **Harvard-style resume** — one-click generation of a classic, ATS-friendly [Harvard resume](https://careerservices.fas.harvard.edu/) (single-column, black-and-white) built deterministically from your profile data — no job or LLM required — with clean page-break handling so entries never split across pages.
 - **Automated applying** — submit via LinkedIn Easy Apply (Playwright) or Gmail SMTP email, with built-in daily rate limiting and randomized delays.
 - **Interview simulator** — chat with an AI that role-plays the target company's HR persona, with an inline coaching overlay and post-session scoring.
 - **Encrypted secrets** — per-user API keys are stored encrypted at rest (Fernet / AES-128 + HMAC).
@@ -136,7 +138,9 @@ The frontend is fixed to port **3000**, which is the only origin allowed by the 
 ## 🧭 Usage Lifecycle
 
 1. **Profile Selector / Onboarding** — create or pick a user. New users can paste a free-text dump and let the LLM build a structured profile.
-2. **Dashboard** — review your profile completeness score and application history.
+2. **Dashboard** — review your profile completeness score and application history. From here you can also:
+   - **Quick CV** — enter a role title (and optionally paste a job description, or leave it blank to let the AI draft one) to instantly generate a tailored CV from your profile.
+   - **Generate Resume** — produce a Harvard-format resume from your profile in one click. Saved documents are listed below, where they can be previewed full-screen, downloaded, and reordered.
 3. **Discovery** — get AI role suggestions, then scrape real LinkedIn listings into your target list.
 4. **Review** — run the GAN Generator/Discriminator loop to produce a tailored CV + cover letter, watch progress stream live, then preview/edit before exporting to PDF.
 5. **Apply Queue** — submit applications sequentially via Easy Apply or Gmail SMTP, with daily limits and randomized delays.
@@ -208,7 +212,7 @@ All endpoints are mounted under `/api` (full schema at `/docs`):
 | `/api/users` | User CRUD, active-user switching, encrypted API keys, onboarding |
 | `/api/profile` | Profile read/update/completeness |
 | `/api/discovery` | Role suggestions, LinkedIn scraping, target management |
-| `/api/generation` | CV/cover-letter generation with SSE progress streaming |
+| `/api/generation` | CV/cover-letter generation with SSE progress streaming; Quick CV (`/quick/*`) and Harvard resume (`/resume/*`) generation, listing, and reordering |
 | `/api/apply` | Sequential application execution with rate limiting |
 | `/api/history` | Application history |
 | `/api/interview` | Interview session start/message/help/end |
